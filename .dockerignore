@@ -1,0 +1,40 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+README.md
+*.md
+
+# Development files
+.env
+.vscode/
+.idea/
+
+# Test files
+*_test.go
+**/test/**
+coverage.out
+
+# Example storage (runtime data)
+_examples/local/storage/
+
+# Build artifacts
+_examples/client/client
+_examples/local/server
+
+# Temporary files
+*.tmp
+*.log
+
+# AI-related files
+CLAUDE.md
+GEMINI.md
+.agent/
+.claude/
+
+# Docker
+Dockerfile
+docker-compose.yml
+docker-compose.yaml
+.dockerignore

@@ -21,7 +21,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	m, err := model.GetModel(ctx, "ollama", "llama3.2")
+	m, err := model.GetModel(ctx, "ollama", "llama3.2:1b")
 	if err != nil {
 		panic(fmt.Errorf("failed to get model: %w", err))
 	}

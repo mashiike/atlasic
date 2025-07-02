@@ -25,6 +25,10 @@ go.work.sum
 /build
 /dist
 
+# Example binaries
+_examples/client/client
+_examples/local/server
+
 # AI-related files
 CLAUDE.md
 GEMINI.md

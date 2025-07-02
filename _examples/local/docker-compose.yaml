@@ -1,0 +1,48 @@
+services:
+  # Ollama service for LLM
+  ollama:
+    image: ollama/ollama:latest
+    container_name: atlasic-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # ATLASIC A2A Server
+  atlasic-server:
+    build:
+      context: ../../  # Build from project root
+      dockerfile: _examples/local/Dockerfile
+    container_name: atlasic-server
+    ports:
+      - "8080:8080"
+    environment:
+      - A2A_STORAGE_DIR=/tmp/a2a
+      - OLLAMA_HOST=http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy
+    volumes:
+      - server_storage:/tmp/a2a
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/.well-known/agent.json"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  ollama_data:
+    driver: local
+  server_storage:
+    driver: local

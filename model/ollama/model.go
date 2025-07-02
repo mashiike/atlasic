@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 
 	"github.com/mashiike/atlasic/a2a"
 	"github.com/mashiike/atlasic/model"
@@ -16,8 +17,13 @@ import (
 )
 
 func init() {
+	endpoint := DefaultEndpoint
+	if ollamaHost := os.Getenv("OLLAMA_HOST"); ollamaHost != "" {
+		endpoint = ollamaHost + "/api/chat"
+	}
+	
 	p := &ModelProvider{
-		Endpoint: DefaultEndpoint,
+		Endpoint: endpoint,
 	}
 	model.Register("ollama", p)
 }
