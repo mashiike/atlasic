@@ -30,21 +30,51 @@ tasks:
 
   # Testing tasks
   test:
-    desc: Run all tests
+    desc: Run unit tests
     cmds:
-      - go test ./...
+      - go test -short ./...
 
-  test:verbose:
-    desc: Run all tests with verbose output
+  test:integration:
+    desc: Run integration tests (requires Docker services)
+    deps: [docker:up]
     cmds:
-      - go test -v ./...
+      - go test -v ./awsadp -run Integration
 
   test:coverage:
     desc: Run tests with coverage report
+    deps: [docker:up]
     cmds:
       - go test -v -cover ./... -coverprofile={{.COVERAGE_OUT}}
       - go tool cover -html={{.COVERAGE_OUT}} -o coverage.html
       - echo "Coverage report generated - coverage.html"
+
+  # Docker services for testing
+  docker:up:
+    desc: Start Docker services for integration testing (minio, ElasticMQ)
+    cmds:
+      - echo "🐳 Starting Docker services for testing..."
+      - docker-compose up -d minio elasticmq
+      - echo "⏳ Waiting for services to be ready..."
+      - sleep 10
+      - echo "✅ Docker services are ready"
+
+  docker:down:
+    desc: Stop Docker services
+    cmds:
+      - echo "🐳 Stopping Docker services..."
+      - docker-compose down
+      - echo "✅ Docker services stopped"
+
+  docker:logs:
+    desc: Show logs from Docker services
+    cmds:
+      - docker-compose logs
+
+  docker:restart:
+    desc: Restart Docker services
+    cmds:
+      - task: docker:down
+      - task: docker:up
 
   # A2A Specification tasks
   update-schema:
@@ -90,7 +120,7 @@ tasks:
 
   check:
     desc: Run all code quality checks
-    deps: [fmt, vet, lint, test]
+    deps: [fmt, vet, lint, test, test:integration]
 
   # Clean up
   clean:

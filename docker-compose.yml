@@ -1,0 +1,41 @@
+services:
+  # MinIO for S3 Storage testing
+  minio:
+    image: minio/minio:latest
+    container_name: atlasic-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # ElasticMQ for SQS JobQueue testing
+  elasticmq:
+    image: softwaremill/elasticmq-native:latest
+    container_name: atlasic-elasticmq
+    ports:
+      - "9324:9324"
+      - "9325:9325" # ElasticMQ UI
+    volumes:
+      - ./elasticmq.conf:/opt/elasticmq.conf
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9324/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  minio_data:
+
+networks:
+  default:
+    name: atlasic-test

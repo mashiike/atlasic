@@ -10,6 +10,7 @@ ATLASIC (A2A Toolkit Library to build Agent Service for Infrastructure on Cloud)
 - **A2A Protocol Implementation**: Full compliance with Agent-to-Agent communication specification
 - **HTTP Server**: Ready-to-use server with JSON-RPC and Server-Sent Events
 - **Storage Backends**: Local filesystem and AWS S3 adapters
+- **Job Queue**: In-memory and AWS SQS adapters for distributed processing
 - **Event Sourcing**: Complete task history with optimistic concurrency control
 - **Streaming Support**: Real-time agent communication with SSE
 - **Content Negotiation**: Flexible output format handling
@@ -81,6 +82,24 @@ server := &atlasic.Server{
 }
 ```
 
+### AWS SQS JobQueue
+
+```go
+import "github.com/mashiike/atlasic/awsadp"
+
+jobQueue, _ := awsadp.NewSQSJobQueue(awsadp.SQSJobQueueConfig{
+    Client:   sqsClient,
+    QueueURL: "https://sqs.us-east-1.amazonaws.com/123456789012/my-queue",
+})
+
+server := &atlasic.Server{
+    Addr:     ":8080",
+    Agent:    agent,
+    Storage:  storage,
+    JobQueue: jobQueue,
+}
+```
+
 ## API Usage
 
 ### Send Message
@@ -112,16 +131,66 @@ curl -N http://localhost:8080/message/stream \
   }'
 ```
 
-## Testing
+## Development
+
+### Prerequisites
+
+- [Go 1.21+](https://golang.org/dl/)
+- [Task](https://taskfile.dev/installation/) (optional, for simplified commands)
+- [Docker](https://www.docker.com/) (for integration tests)
+
+### Quick Development Setup
 
 ```bash
-# Run tests
-go test ./...
+# Install dependencies
+task deps
 
-# Run integration tests with minio
-docker-compose -f docker-compose.test.yml up -d
+# Run unit tests
+task test
+
+# Run integration tests (includes S3Storage + SQSJobQueue)
+task test:integration
+
+# Run all quality checks
+task check
+
+# Generate coverage report
+task test:coverage
+```
+
+### Available Commands
+
+```bash
+# Core development
+task build          # Build the project
+task test            # Run unit tests
+task test:integration # Run integration tests (starts Docker services)
+task test:coverage   # Run tests with coverage report
+
+# Code quality
+task fmt             # Format code
+task lint            # Run linter
+task check           # Run all quality checks
+
+# Docker services (for integration tests)
+task docker:up       # Start minio + ElasticMQ
+task docker:down     # Stop services
+task docker:restart  # Restart services
+
+# Cleanup
+task clean           # Clean build artifacts
+```
+
+### Manual Testing (without Task)
+
+```bash
+# Unit tests only
+go test -short ./...
+
+# Integration tests (requires Docker services)
+docker-compose up -d
 go test ./awsadp -v
-docker-compose -f docker-compose.test.yml down
+docker-compose down
 ```
 
 ## License
