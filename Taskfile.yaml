@@ -1,0 +1,102 @@
+# https://taskfile.dev
+
+version: '3'
+
+vars:
+  A2A_SCHEMA_URL: https://raw.githubusercontent.com/a2aproject/A2A/refs/heads/main/specification/json/a2a.json
+  COVERAGE_OUT: coverage.out
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmd: task --list
+
+  # Development tasks
+  deps:
+    desc: Download and tidy Go dependencies
+    cmds:
+      - go mod download
+      - go mod tidy
+
+  generate:
+    desc: Generate mocks and other auto-generated code
+    cmds:
+      - go generate ./...
+
+  build:
+    desc: Build the project
+    cmds:
+      - go build ./...
+
+  # Testing tasks
+  test:
+    desc: Run all tests
+    cmds:
+      - go test ./...
+
+  test:verbose:
+    desc: Run all tests with verbose output
+    cmds:
+      - go test -v ./...
+
+  test:coverage:
+    desc: Run tests with coverage report
+    cmds:
+      - go test -v -cover ./... -coverprofile={{.COVERAGE_OUT}}
+      - go tool cover -html={{.COVERAGE_OUT}} -o coverage.html
+      - echo "Coverage report generated - coverage.html"
+
+  # A2A Specification tasks
+  update-schema:
+    desc: Update A2A schema from official repository
+    cmds:
+      - echo "📥 Downloading latest A2A schema..."
+      - curl -sSL {{.A2A_SCHEMA_URL}} > docs/a2a-schema.json
+      - echo "✅ A2A schema updated successfully"
+
+  check-schema:
+    desc: Check if A2A schema is up-to-date
+    cmds:
+      - echo "🔍 Checking A2A schema differences..."
+      - curl -sSL {{.A2A_SCHEMA_URL}} > /tmp/a2a-schema-latest.json
+      - |
+        if diff -q docs/a2a-schema.json /tmp/a2a-schema-latest.json > /dev/null; then
+          echo "✅ A2A schema is up-to-date"
+        else
+          echo "⚠️  A2A schema is outdated. Run 'task update-schema' to update."
+        fi
+      - rm -f /tmp/a2a-schema-latest.json
+
+  # Code quality tasks
+  fmt:
+    desc: Format Go code
+    cmds:
+      - go fmt ./...
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  lint:
+    desc: Run golangci-lint (if available)
+    cmds:
+      - |
+        if command -v golangci-lint >/dev/null 2>&1; then
+          golangci-lint run
+        else
+          echo "⚠️  golangci-lint not installed"
+        fi
+
+  check:
+    desc: Run all code quality checks
+    deps: [fmt, vet, lint, test]
+
+  # Clean up
+  clean:
+    desc: Clean build artifacts and temporary files
+    cmds:
+      - rm -f {{.COVERAGE_OUT}} coverage.html
+      - rm -rf dist/
+      - go clean -cache
+      - go clean -testcache

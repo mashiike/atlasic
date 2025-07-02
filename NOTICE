@@ -1,0 +1,7 @@
+This project is licensed under the MIT License.
+
+This project includes components from other projects.
+
+- The A2A Protocol JSON Schema located in `docs/spec/a2a-schema.json` is vendored from the a2aproject/A2A repository and is licensed under the Apache License 2.0.
+  - Source: https://github.com/a2aproject/A2A
+  - Commit: 7fd0dcc6e43cc3ab53cb2f01e3885f2a756c6a09

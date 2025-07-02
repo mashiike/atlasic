@@ -1,0 +1,578 @@
+package transport
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"strings"
+	"sync"
+
+	"github.com/mashiike/atlasic/a2a"
+)
+
+// JSONRPCMethodHandler defines the signature for JSON-RPC method handlers
+type JSONRPCMethodHandler func(ctx context.Context, params json.RawMessage) (interface{}, error)
+
+// HandlerOption defines configuration option for Handler
+type HandlerOption func(*handlerConfig)
+
+// handlerConfig holds internal configuration for Handler
+type handlerConfig struct {
+	rpcPath              string
+	agentCardPath        string
+	agentCardCacheMaxAge int
+	logger               *slog.Logger // Optional logger for debug output
+}
+
+// WithRPCPath sets the JSON-RPC endpoint path (default: "/")
+func WithRPCPath(path string) HandlerOption {
+	return func(c *handlerConfig) {
+		c.rpcPath = path
+	}
+}
+
+// WithAgentCardPath sets the agent card endpoint path (default: "/.well-known/agent.json")
+func WithAgentCardPath(path string) HandlerOption {
+	return func(c *handlerConfig) {
+		c.agentCardPath = path
+	}
+}
+
+// WithAgentCardCacheMaxAge sets cache max-age for agent card in seconds (default: 3600)
+func WithAgentCardCacheMaxAge(seconds int) HandlerOption {
+	return func(c *handlerConfig) {
+		c.agentCardCacheMaxAge = seconds
+	}
+}
+
+// WithLogger sets an optional logger for debug output
+func WithLogger(logger *slog.Logger) HandlerOption {
+	return func(c *handlerConfig) {
+		c.logger = logger
+	}
+}
+
+// methodDescriptor represents an A2A method with its properties and handler
+type methodDescriptor struct {
+	method    string                                                                                 // Method name (e.g., "message/send")
+	mediaType string                                                                                 // Response media type ("application/json" or "text/event-stream")
+	handler   func(ctx context.Context, params json.RawMessage, w http.ResponseWriter, id any) error // Handler function
+}
+
+// Handler wraps an AgentService and provides JSON-RPC over HTTP handling
+type Handler struct {
+	mu             sync.RWMutex
+	service        AgentService
+	methodRegistry map[string]methodDescriptor
+	config         handlerConfig
+}
+
+// NewHandler creates a new A2A JSON-RPC handler with options
+func NewHandler(service AgentService, options ...HandlerOption) *Handler {
+	config := handlerConfig{
+		rpcPath:              "/",
+		agentCardPath:        "/.well-known/agent.json",
+		agentCardCacheMaxAge: 3600,
+		logger:               slog.Default(), // Default logger
+	}
+
+	for _, option := range options {
+		option(&config)
+	}
+
+	h := &Handler{
+		service: service,
+		config:  config,
+	}
+	h.initMethodRegistry()
+	return h
+}
+
+// initMethodRegistry initializes the method registry with all supported A2A methods
+func (h *Handler) initMethodRegistry() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.methodRegistry = make(map[string]methodDescriptor)
+
+	// JSON methods (unified registration)
+	h.registerJSONMethod(a2a.MethodSendMessage, h.handleSendMessage)
+	h.registerJSONMethod(a2a.MethodGetTask, h.handleGetTask)
+	h.registerJSONMethod(a2a.MethodCancelTask, h.handleCancelTask)
+	h.registerJSONMethod(a2a.MethodSetTaskPushNotificationConfig, h.handleSetTaskPushNotificationConfig)
+	h.registerJSONMethod(a2a.MethodGetTaskPushNotificationConfig, h.handleGetTaskPushNotificationConfig)
+
+	// Streaming methods (internal only)
+	h.registerStreamMethod(a2a.MethodSendStreamingMessage, h.handleSendStreamingMessage)
+	h.registerStreamMethod(a2a.MethodTaskResubscription, h.handleTaskResubscribe)
+}
+
+// RegisterMethod registers a JSON-RPC method with simplified handler
+func (h *Handler) RegisterMethod(method string, handler JSONRPCMethodHandler) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, exists := h.methodRegistry[method]; exists {
+		panic(fmt.Sprintf("method %s already registered", method))
+	}
+	h.registerJSONMethod(method, handler)
+}
+
+// registerJSONMethod registers a JSON-RPC method (internal use)
+func (h *Handler) registerJSONMethod(method string, handler JSONRPCMethodHandler) {
+	wrappedHandler := func(ctx context.Context, params json.RawMessage, w http.ResponseWriter, id interface{}) error {
+		result, err := handler(ctx, params)
+		if err != nil {
+			// Check if error is a JSONRPCError and handle it directly
+			if jsonrpcErr, ok := err.(*a2a.JSONRPCError); ok {
+				h.writeErrorResponse(w, id, jsonrpcErr.Code, jsonrpcErr.Message, jsonrpcErr.Data)
+				return nil
+			}
+			// Convert regular errors to JSON-RPC Internal Server Error
+			h.writeErrorResponse(w, id, a2a.ErrorCodeInternalError, a2a.ErrorCodeText(a2a.ErrorCodeInternalError), err.Error())
+			return nil
+		}
+		h.writeSuccessResponse(w, id, result)
+		return nil
+	}
+
+	h.methodRegistry[method] = methodDescriptor{
+		method:    method,
+		mediaType: "application/json",
+		handler:   wrappedHandler,
+	}
+}
+
+// registerStreamMethod registers a streaming method (internal use only)
+func (h *Handler) registerStreamMethod(method string, handler func(ctx context.Context, params json.RawMessage, w http.ResponseWriter, id any) error) {
+	h.methodRegistry[method] = methodDescriptor{
+		method:    method,
+		mediaType: "text/event-stream",
+		handler:   handler,
+	}
+}
+
+// clientAcceptsSSE determines if the client accepts Server-Sent Events
+// If forValidSSEMethod is true, also accepts */* and text/* (for valid SSE methods)
+// Otherwise, only accepts explicit text/event-stream (for error cases)
+func clientAcceptsSSE(acceptHeader string, forValidSSEMethod bool) bool {
+	// text/event-stream explicitly accepts SSE
+	if strings.Contains(acceptHeader, "text/event-stream") {
+		return true
+	}
+
+	// For valid SSE methods, also accept broader content types
+	if forValidSSEMethod {
+		// text/* accepts all text types including SSE
+		if strings.Contains(acceptHeader, "text/*") {
+			return true
+		}
+
+		// */* accepts everything including SSE
+		if strings.Contains(acceptHeader, "*/*") {
+			return true
+		}
+	}
+
+	return false
+}
+
+// ServeHTTP implements http.Handler interface
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Handle Agent Card endpoint
+	if r.Method == http.MethodGet && r.URL.Path == h.config.agentCardPath {
+		h.config.logger.Debug("Handling agent card request", "path", r.URL.Path)
+		h.handleWellKnownAgentCard(w, r)
+		return
+	}
+
+	// Handle JSON-RPC endpoint
+	if r.URL.Path != h.config.rpcPath {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Only accept POST requests for JSON-RPC
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse JSON-RPC request
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		h.writeErrorResponse(w, nil, a2a.ErrorCodeParseError, a2a.ErrorCodeText(a2a.ErrorCodeParseError), nil)
+		return
+	}
+
+	var req a2a.JSONRPCRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		h.writeErrorResponse(w, nil, a2a.ErrorCodeParseError, a2a.ErrorCodeText(a2a.ErrorCodeParseError), err.Error())
+		return
+	}
+
+	// Validate JSON-RPC version
+	if req.JSONRpc != "2.0" {
+		h.writeErrorResponse(w, req.ID, a2a.ErrorCodeInvalidRequest, a2a.ErrorCodeText(a2a.ErrorCodeInvalidRequest), nil)
+		return
+	}
+
+	// Route method using the new registry approach
+	h.routeMethodByRegistry(r.Context(), req, w, r.Header.Get("Accept"))
+}
+
+// routeMethodByRegistry routes the method using the method registry
+func (h *Handler) routeMethodByRegistry(ctx context.Context, req a2a.JSONRPCRequest, w http.ResponseWriter, acceptHeader string) {
+	// Look up method in registry first
+	entity, exists := h.methodRegistry[req.Method]
+
+	if !exists {
+		// Method not found - only use SSE if explicitly requested (not for */* or text/*)
+		clientWantsSSE := clientAcceptsSSE(acceptHeader, false)
+		if clientWantsSSE {
+			h.setupSSEHeaders(w)
+			h.writeSSEError(w, req.ID, a2a.ErrorCodeMethodNotFound, a2a.ErrorCodeText(a2a.ErrorCodeMethodNotFound), nil)
+		} else {
+			h.writeErrorResponse(w, req.ID, a2a.ErrorCodeMethodNotFound, a2a.ErrorCodeText(a2a.ErrorCodeMethodNotFound), nil)
+		}
+		return
+	}
+
+	// Check if this is an SSE method and if client accepts it
+	isSSEMethod := entity.mediaType == "text/event-stream"
+	clientWantsSSE := clientAcceptsSSE(acceptHeader, isSSEMethod)
+
+	if isSSEMethod && !clientWantsSSE {
+		// SSE method but client doesn't accept SSE
+		h.writeErrorResponse(w, req.ID, a2a.ErrorCodeMethodNotFound, a2a.ErrorCodeText(a2a.ErrorCodeMethodNotFound), nil)
+		return
+	}
+
+	// Set appropriate headers for SSE methods
+	if isSSEMethod {
+		h.setupSSEHeaders(w)
+	}
+
+	// Convert params to json.RawMessage for handler
+	paramsRaw, err := json.Marshal(req.Params)
+	if err != nil {
+		if isSSEMethod {
+			h.writeSSEError(w, req.ID, a2a.ErrorCodeInvalidParams, a2a.ErrorCodeText(a2a.ErrorCodeInvalidParams), err.Error())
+		} else {
+			h.writeErrorResponse(w, req.ID, a2a.ErrorCodeInvalidParams, a2a.ErrorCodeText(a2a.ErrorCodeInvalidParams), err.Error())
+		}
+		return
+	}
+
+	// Execute the handler
+	err = entity.handler(ctx, paramsRaw, w, req.ID)
+	if err != nil {
+		// Check if error is a JSONRPCError and handle it directly
+		if jsonrpcErr, ok := err.(*a2a.JSONRPCError); ok {
+			if isSSEMethod {
+				h.writeSSEError(w, req.ID, jsonrpcErr.Code, jsonrpcErr.Message, jsonrpcErr.Data)
+			} else {
+				h.writeErrorResponse(w, req.ID, jsonrpcErr.Code, jsonrpcErr.Message, jsonrpcErr.Data)
+			}
+			return
+		}
+
+		// Convert regular errors to JSON-RPC Internal Server Error
+		if isSSEMethod {
+			h.writeSSEError(w, req.ID, a2a.ErrorCodeInternalError, a2a.ErrorCodeText(a2a.ErrorCodeInternalError), err.Error())
+		} else {
+			h.writeErrorResponse(w, req.ID, a2a.ErrorCodeInternalError, a2a.ErrorCodeText(a2a.ErrorCodeInternalError), err.Error())
+		}
+		return
+	}
+
+	// For non-SSE methods that return success, the handler should have already written the response
+	// SSE methods handle their own streaming responses
+}
+
+// handleSendMessage handles message/send as JSONRPCMethodHandler
+func (h *Handler) handleSendMessage(ctx context.Context, params json.RawMessage) (interface{}, error) {
+	var req a2a.MessageSendParams
+	if err := json.Unmarshal(params, &req); err != nil {
+		return nil, a2a.NewJSONRPCInvalidParamsError("Failed to parse message send parameters")
+	}
+
+	// Perform content negotiation if AcceptedOutputModes is specified
+	if req.Configuration != nil && len(req.Configuration.AcceptedOutputModes) > 0 {
+		supportedModes, err := h.service.SupportedOutputModes(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		_, err = FindCompatibleOutputModes(req.Configuration.AcceptedOutputModes, supportedModes)
+		if err != nil {
+			return nil, err // This will be ContentTypeNotSupportedError (-32005)
+		}
+	}
+
+	return h.service.SendMessage(ctx, req)
+}
+
+// handleGetTask handles tasks/get as JSONRPCMethodHandler
+func (h *Handler) handleGetTask(ctx context.Context, params json.RawMessage) (interface{}, error) {
+	var req a2a.TaskQueryParams
+	if err := json.Unmarshal(params, &req); err != nil {
+		return nil, a2a.NewJSONRPCInvalidParamsError("Failed to parse task query parameters")
+	}
+	return h.service.GetTask(ctx, req)
+}
+
+// handleCancelTask handles tasks/cancel as JSONRPCMethodHandler
+func (h *Handler) handleCancelTask(ctx context.Context, params json.RawMessage) (interface{}, error) {
+	var req a2a.TaskIDParams
+	if err := json.Unmarshal(params, &req); err != nil {
+		return nil, a2a.NewJSONRPCInvalidParamsError("Failed to parse task ID parameters")
+	}
+	return h.service.CancelTask(ctx, req)
+}
+
+// handleSetTaskPushNotificationConfig handles tasks/pushNotificationConfig/set as JSONRPCMethodHandler
+func (h *Handler) handleSetTaskPushNotificationConfig(ctx context.Context, params json.RawMessage) (interface{}, error) {
+	var req a2a.TaskPushNotificationConfig
+	if err := json.Unmarshal(params, &req); err != nil {
+		return nil, a2a.NewJSONRPCInvalidParamsError("Failed to parse push notification config parameters")
+	}
+	return h.service.SetTaskPushNotificationConfig(ctx, req)
+}
+
+// handleGetTaskPushNotificationConfig handles tasks/pushNotificationConfig/get as JSONRPCMethodHandler
+func (h *Handler) handleGetTaskPushNotificationConfig(ctx context.Context, params json.RawMessage) (interface{}, error) {
+	var req a2a.GetTaskPushNotificationConfigParams
+	if err := json.Unmarshal(params, &req); err != nil {
+		return nil, a2a.NewJSONRPCInvalidParamsError("Failed to parse get task push notification config parameters")
+	}
+	return h.service.GetTaskPushNotificationConfig(ctx, req)
+}
+
+// handleSendStreamingMessage handles message/stream JSON-RPC method with SSE
+func (h *Handler) handleSendStreamingMessage(ctx context.Context, params json.RawMessage, w http.ResponseWriter, id interface{}) error {
+	var req a2a.MessageSendParams
+	if err := json.Unmarshal(params, &req); err != nil {
+		return a2a.NewJSONRPCInvalidParamsError("Failed to parse message send parameters")
+	}
+
+	// Perform content negotiation if AcceptedOutputModes is specified
+	if req.Configuration != nil && len(req.Configuration.AcceptedOutputModes) > 0 {
+		supportedModes, err := h.service.SupportedOutputModes(ctx)
+		if err != nil {
+			return err
+		}
+
+		_, err = FindCompatibleOutputModes(req.Configuration.AcceptedOutputModes, supportedModes)
+		if err != nil {
+			return err // This will be ContentTypeNotSupportedError (-32005)
+		}
+	}
+
+	// Call the streaming method to get the channel
+	streamChan, err := h.service.SendStreamingMessage(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	// Write SSE stream from the channel
+	return writeSSEStream(w, id, streamChan)
+}
+
+// handleTaskResubscribe handles tasks/resubscribe JSON-RPC method with SSE
+func (h *Handler) handleTaskResubscribe(ctx context.Context, params json.RawMessage, w http.ResponseWriter, id interface{}) error {
+	var req a2a.TaskIDParams
+	if err := json.Unmarshal(params, &req); err != nil {
+		return a2a.NewJSONRPCInvalidParamsError("Failed to parse task ID parameters")
+	}
+
+	// Call the streaming method to get the channel
+	streamChan, err := h.service.TaskResubscription(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	// Write SSE stream from the channel
+	return writeSSEStream(w, id, streamChan)
+}
+
+// handleWellKnownAgentCard handles GET requests for agent card endpoint
+func (h *Handler) handleWellKnownAgentCard(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	agentCard, err := h.service.GetAgentCard(ctx)
+	if err != nil {
+		h.config.logger.Error("Failed to get agent card", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	// Replace placeholder URL with actual host if needed (BaseEndpoint)
+	if agentCard.URL == PlaceholderURL {
+		agentCard.URL = h.buildRequestBaseEndpoint(r)
+	}
+
+	// Always join the base endpoint with rpcPath to get the final URL
+	if finalURL, err := url.JoinPath(agentCard.URL, h.config.rpcPath); err == nil {
+		agentCard.URL = finalURL
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if h.config.agentCardCacheMaxAge > 0 {
+		w.Header().Set("Cache-Control",
+			fmt.Sprintf("public, max-age=%d", h.config.agentCardCacheMaxAge))
+	}
+
+	if err := json.NewEncoder(w).Encode(agentCard); err != nil {
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+}
+
+// buildRequestBaseEndpoint constructs base endpoint from HTTP request considering proxies
+func (h *Handler) buildRequestBaseEndpoint(r *http.Request) string {
+	// Check X-Forwarded-Proto first, then fallback to TLS detection
+	scheme := "http"
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		scheme = proto
+	} else if r.TLS != nil {
+		scheme = "https"
+	}
+
+	// Check X-Forwarded-Host first, then fallback to Host header
+	host := r.Host
+	if forwarded := r.Header.Get("X-Forwarded-Host"); forwarded != "" {
+		host = forwarded
+	}
+
+	return fmt.Sprintf("%s://%s/", scheme, host)
+}
+
+// writeSuccessResponse writes a successful JSON-RPC response
+func (h *Handler) writeSuccessResponse(w http.ResponseWriter, id interface{}, result interface{}) {
+	resp := a2a.NewJSONRPCResponse(result, id)
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		h.config.logger.Error("failed to write response", "error", err)
+	}
+}
+
+// writeErrorResponse writes an error JSON-RPC response
+func (h *Handler) writeErrorResponse(w http.ResponseWriter, id interface{}, code int, message string, data interface{}) {
+	resp := a2a.NewJSONRPCErrorResponse(code, message, data, id)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK) // JSON-RPC errors are still HTTP 200
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		h.config.logger.Error("failed to write response", "error", err)
+	}
+}
+
+// setupSSEHeaders sets up Server-Sent Events headers
+func (h *Handler) setupSSEHeaders(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+}
+
+// writeSSEError writes an error as SSE event
+func (h *Handler) writeSSEError(w http.ResponseWriter, id interface{}, code int, message string, data interface{}) {
+	resp := a2a.NewJSONRPCErrorResponse(code, message, data, id)
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	respBytes, err := json.Marshal(resp)
+	if err != nil {
+		// This should not happen with a well-formed response structure
+		h.config.logger.Error("failed to marshal SSE error response", "error", err)
+		return
+	}
+	fmt.Fprintf(w, "data: %s\n\n", respBytes)
+
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// canHandle checks if the handler can process the request
+func (h *Handler) canHandle(r *http.Request) bool {
+	return (r.Method == http.MethodGet && r.URL.Path == h.config.agentCardPath) ||
+		(r.Method == http.MethodPost && r.URL.Path == h.config.rpcPath)
+}
+
+// A2AMiddleware creates middleware that handles A2A requests and passes others to next handler
+func A2AMiddleware(service AgentService, options ...HandlerOption) func(http.Handler) http.Handler {
+	a2aHandler := NewHandler(service, options...)
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if a2aHandler.canHandle(r) {
+				a2aHandler.ServeHTTP(w, r)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// writeSSEStream writes a stream of responses from a channel as Server-Sent Events
+func writeSSEStream(w http.ResponseWriter, id interface{}, streamChan <-chan a2a.StreamResponse) error {
+	// Ensure we have flusher support
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		return fmt.Errorf("streaming unsupported")
+	}
+
+	// Process each response from the channel
+	for response := range streamChan {
+		// Convert response to JSON-RPC format
+		jsonrpcResp := a2a.NewJSONRPCResponse(response, id)
+
+		// Marshal to JSON
+		respBytes, err := json.Marshal(jsonrpcResp)
+		if err != nil {
+			// Write error event and continue
+			errorResp := a2a.NewInternalError(id, err.Error())
+			errorBytes, err := json.Marshal(errorResp)
+			if err != nil {
+				// This should not happen with a well-formed response structure
+				return err
+			}
+			fmt.Fprintf(w, "data: %s\n\n", errorBytes)
+			flusher.Flush()
+			continue
+		}
+
+		// Write as SSE data event
+		fmt.Fprintf(w, "data: %s\n\n", respBytes)
+		flusher.Flush()
+	}
+
+	return nil
+}
+
+// WriteSSEError writes an error event as Server-Sent Events
+func WriteSSEError(w http.ResponseWriter, id interface{}, code int, message string, data interface{}) error {
+	// Ensure we have flusher support
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		return fmt.Errorf("streaming unsupported")
+	}
+
+	// Create error response
+	errorResp := a2a.NewJSONRPCErrorResponse(code, message, data, id)
+
+	// Marshal to JSON
+	respBytes, err := json.Marshal(errorResp)
+	if err != nil {
+		return err
+	}
+
+	// Write as SSE data event
+	fmt.Fprintf(w, "data: %s\n\n", respBytes)
+	flusher.Flush()
+
+	return nil
+}
