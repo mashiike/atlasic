@@ -695,6 +695,39 @@ func (s *AgentService) TaskResubscription(ctx context.Context, params a2a.TaskID
 	return s.streamTaskEvents(ctx, task.ContextID, params.ID, false, nil), nil
 }
 
+// findActiveTaskByContextID searches for a non-terminal task within the specified context
+func (s *AgentService) findActiveTaskByContextID(ctx context.Context, contextID string) (*a2a.Task, error) {
+	tasks, _, err := s.Storage.ListTasksByContext(ctx, contextID, HistoryLengthAll)
+	if err != nil {
+		if errors.Is(err, ErrContextNotFound) {
+			return nil, nil // Context doesn't exist = no active tasks
+		}
+		return nil, err
+	}
+
+	var activeTasks []*a2a.Task
+	for _, task := range tasks {
+		if !task.Status.State.IsTerminal() {
+			activeTasks = append(activeTasks, task)
+		}
+	}
+
+	switch len(activeTasks) {
+	case 0:
+		return nil, nil // No active tasks found
+	case 1:
+		return activeTasks[0], nil // Single active task found
+	default:
+		// A2A specification: Multiple active tasks in context is an error
+		return nil, a2a.NewJSONRPCError(a2a.ErrorCodeInvalidParams, map[string]string{
+			"reason":          "Multiple active tasks found in context",
+			"contextId":       contextID,
+			"activeTaskCount": fmt.Sprintf("%d", len(activeTasks)),
+			"suggestion":      "Complete or cancel existing tasks before sending new messages",
+		})
+	}
+}
+
 // processMessage handles common message processing logic for both SendMessage and SendStreamingMessage
 func (s *AgentService) processMessage(ctx context.Context, params a2a.MessageSendParams) (taskID, contextID string, shouldExecuteAgent bool, err error) {
 	// Get IDGenerator (lazy initialization)
@@ -751,7 +784,41 @@ func (s *AgentService) processMessage(ctx context.Context, params a2a.MessageSen
 		// Note: Do not change task status when adding message to existing task
 		// The original task status is preserved
 	}
-	// Create new task - check if contextID should be inherited or generated
+	// Check if contextID should be inherited or generated
+	if params.Message.ContextID != "" {
+		// Check if there's an active task in the specified context
+		activeTask, err := s.findActiveTaskByContextID(ctx, params.Message.ContextID)
+		if err != nil {
+			return "", "", false, err
+		}
+
+		if activeTask != nil {
+			// Found active task - add message to existing task
+			taskID = activeTask.ID
+			contextID = activeTask.ContextID
+
+			// Add user message to existing task using event sourcing
+			if _, err := s.addMessage(ctx, taskID, params.Message.MessageID, a2a.RoleUser, params.Message.Parts, func(mo *a2a.MessageOptions) {
+				mo.Extensions = params.Message.Extensions
+				mo.Metadata = params.Message.Metadata
+				mo.ReferenceTaskIDs = params.Message.ReferenceTaskIDs
+			}); err != nil {
+				return "", "", false, fmt.Errorf("failed to add message to active task: %w", err)
+			}
+
+			// Only interrupted tasks can restart agent execution
+			shouldExecuteAgent = activeTask.Status.State.IsInterrupted()
+			return taskID, contextID, shouldExecuteAgent, nil
+		}
+
+		// No active task found - continue with new task creation using provided contextID
+		contextID = params.Message.ContextID
+	} else {
+		// Start completely new conversation
+		contextID = idGen.GenerateContextID()
+	}
+	
+	// Create new task - generate ID and prepare message
 	taskID = idGen.GenerateTaskID()
 	userMessage := a2a.NewMessage(
 		params.Message.MessageID,
@@ -761,14 +828,7 @@ func (s *AgentService) processMessage(ctx context.Context, params a2a.MessageSen
 	userMessage.ReferenceTaskIDs = params.Message.ReferenceTaskIDs // Copy reference task IDs if any
 	userMessage.Extensions = params.Message.Extensions             // Copy extensions if any
 	userMessage.Metadata = params.Message.Metadata                 // Copy metadata if any
-	// Use existing contextID if provided, otherwise generate new one
-	if params.Message.ContextID != "" {
-		// Continue existing conversation context with new task
-		contextID = params.Message.ContextID
-	} else {
-		// Start completely new conversation
-		contextID = idGen.GenerateContextID()
-	}
+	
 	// Create new task using TaskUpdater
 	_, err = s.createNewTask(ctx, taskID, contextID, userMessage)
 	if err != nil {

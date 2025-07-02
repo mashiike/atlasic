@@ -71,7 +71,6 @@ func main() {
 
 	agent := atlasic.NewAgent(metadata, agentFunc)
 
-	// New simplified Server API
 	server := &atlasic.Server{
 		Addr:  ":8080",
 		Agent: agent,

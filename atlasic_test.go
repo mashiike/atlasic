@@ -2,6 +2,7 @@ package atlasic
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -493,6 +494,10 @@ func TestA2A_ContextContinuation(t *testing.T) {
 	}
 
 	// Mock expectations
+	// First, findActiveTaskByContextID will be called to check for existing active tasks
+	mockStorage.EXPECT().ListTasksByContext(gomock.Any(), "existing-context-001", HistoryLengthAll).
+		Return([]*a2a.Task{}, []uint64{}, nil) // Return empty list (no active tasks)
+
 	mockIDGen.EXPECT().GenerateTaskID().Return("new-task-002")
 	// Note: GenerateContextID should NOT be called since contextID is provided
 
@@ -553,6 +558,185 @@ func TestA2A_ContextContinuation(t *testing.T) {
 
 	t.Logf("Successfully created new task in existing context: taskID=%s, contextID=%s",
 		result.Task.ID, result.Task.ContextID)
+}
+
+// TestA2A_ContextContinuation_ActiveTaskFound tests context continuation when active task exists
+func TestA2A_ContextContinuation_ActiveTaskFound(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create mocks
+	mockAgent := NewMockAgent(ctrl)
+	mockStorage := NewMockStorage(ctrl)
+	mockIDGen := NewMockIDGenerator(ctrl)
+
+	// Create agent service
+	agentService := NewAgentService(mockStorage, mockAgent)
+	agentService.SetIDGenerator(mockIDGen)
+	agentService.DisablePushNotifications = true
+
+	// Test message with contextID but no taskID (should find existing active task)
+	message := a2a.Message{
+		Kind:      a2a.KindMessage,
+		MessageID: "msg-002",
+		ContextID: "existing-context-001", // Existing context
+		// TaskID is empty - should find existing active task
+		Role:  a2a.RoleUser,
+		Parts: []a2a.Part{a2a.NewTextPart("Continue with the active task")},
+	}
+
+	params := a2a.MessageSendParams{
+		Message: message,
+		Configuration: &a2a.MessageSendConfiguration{
+			Blocking: false,
+		},
+	}
+
+	// Create an existing active task (input-required state)
+	existingTask := &a2a.Task{
+		Kind:      a2a.KindTask,
+		ID:        "existing-task-001",
+		ContextID: "existing-context-001",
+		Status: a2a.TaskStatus{
+			State: a2a.TaskStateInputRequired, // Non-terminal, interrupted state
+		},
+		History: []a2a.Message{
+			{
+				Kind:      a2a.KindMessage,
+				MessageID: "old-msg-001",
+				ContextID: "existing-context-001",
+				TaskID:    "existing-task-001",
+				Role:      a2a.RoleUser,
+				Parts:     []a2a.Part{a2a.NewTextPart("Original message")},
+			},
+		},
+	}
+
+	// Mock expectations
+	mockStorage.EXPECT().ListTasksByContext(gomock.Any(), "existing-context-001", HistoryLengthAll).
+		Return([]*a2a.Task{existingTask}, []uint64{1}, nil) // Return active task
+
+	// Expect GetTask call from TaskUpdater.addMessage for retrieving current task state
+	mockStorage.EXPECT().GetTask(gomock.Any(), "existing-task-001", HistoryLengthAll).
+		Return(existingTask, uint64(1), nil)
+
+	// Expect addMessage call for adding message to existing task
+	mockStorage.EXPECT().Append(gomock.Any(), "existing-context-001", "existing-task-001", gomock.Any(), gomock.Any()).
+		Return(uint64(3), nil)
+
+	// Expect SaveTask call from TaskUpdater for saving updated task
+	mockStorage.EXPECT().SaveTask(gomock.Any(), gomock.Any(), uint64(1), uint64(2)).
+		Return(nil)
+
+	// Expect final GetTask call to retrieve updated task for result
+	updatedTask := &a2a.Task{
+		Kind:      a2a.KindTask,
+		ID:        "existing-task-001",
+		ContextID: "existing-context-001",
+		Status: a2a.TaskStatus{
+			State: a2a.TaskStateInputRequired,
+		},
+		History: []a2a.Message{
+			existingTask.History[0], // original message
+			{
+				Kind:      a2a.KindMessage,
+				MessageID: "msg-002",
+				ContextID: "existing-context-001",
+				TaskID:    "existing-task-001",
+				Role:      a2a.RoleUser,
+				Parts:     []a2a.Part{a2a.NewTextPart("Continue with the active task")},
+			},
+		},
+	}
+	mockStorage.EXPECT().GetTask(gomock.Any(), "existing-task-001", HistoryLengthAll).
+		Return(updatedTask, uint64(2), nil)
+
+	ctx := context.Background()
+
+	// Call SendMessage
+	result, err := agentService.SendMessage(ctx, params)
+	if err != nil {
+		t.Fatalf("SendMessage failed: %v", err)
+	}
+
+	// Verify the result uses existing task
+	if result.Task.ID != "existing-task-001" {
+		t.Errorf("Expected task ID 'existing-task-001', got '%s'", result.Task.ID)
+	}
+
+	if result.Task.ContextID != "existing-context-001" {
+		t.Errorf("Expected context ID 'existing-context-001', got '%s'", result.Task.ContextID)
+	}
+
+	t.Logf("Successfully continued with existing active task: taskID=%s, contextID=%s", result.Task.ID, result.Task.ContextID)
+}
+
+// TestA2A_ContextContinuation_MultipleActiveTasks tests error when multiple active tasks exist
+func TestA2A_ContextContinuation_MultipleActiveTasks(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create mocks
+	mockAgent := NewMockAgent(ctrl)
+	mockStorage := NewMockStorage(ctrl)
+	mockIDGen := NewMockIDGenerator(ctrl)
+
+	// Create agent service
+	agentService := NewAgentService(mockStorage, mockAgent)
+	agentService.SetIDGenerator(mockIDGen)
+	agentService.DisablePushNotifications = true
+
+	// Test message with contextID but no taskID
+	message := a2a.Message{
+		Kind:      a2a.KindMessage,
+		MessageID: "msg-003",
+		ContextID: "existing-context-001",
+		Role:      a2a.RoleUser,
+		Parts:     []a2a.Part{a2a.NewTextPart("This should fail")},
+	}
+
+	params := a2a.MessageSendParams{
+		Message: message,
+		Configuration: &a2a.MessageSendConfiguration{
+			Blocking: false,
+		},
+	}
+
+	// Create multiple active tasks
+	activeTask1 := &a2a.Task{
+		ID:        "active-task-001",
+		ContextID: "existing-context-001",
+		Status:    a2a.TaskStatus{State: a2a.TaskStateWorking},
+	}
+	activeTask2 := &a2a.Task{
+		ID:        "active-task-002",
+		ContextID: "existing-context-001",
+		Status:    a2a.TaskStatus{State: a2a.TaskStateInputRequired},
+	}
+
+	// Mock expectations
+	mockStorage.EXPECT().ListTasksByContext(gomock.Any(), "existing-context-001", HistoryLengthAll).
+		Return([]*a2a.Task{activeTask1, activeTask2}, []uint64{1, 2}, nil) // Return multiple active tasks
+
+	ctx := context.Background()
+
+	// Call SendMessage - should fail
+	_, err := agentService.SendMessage(ctx, params)
+	if err == nil {
+		t.Fatal("Expected error for multiple active tasks, but got none")
+	}
+
+	// Check if it's the expected JSON-RPC error
+	var jsonrpcErr *a2a.JSONRPCError
+	if !errors.As(err, &jsonrpcErr) {
+		t.Fatalf("Expected JSONRPCError, got %T: %v", err, err)
+	}
+
+	if jsonrpcErr.Code != a2a.ErrorCodeInvalidParams {
+		t.Errorf("Expected error code %d, got %d", a2a.ErrorCodeInvalidParams, jsonrpcErr.Code)
+	}
+
+	t.Logf("Correctly rejected multiple active tasks with error: %v", err)
 }
 
 // TestA2A_NewConversation tests completely new conversation creation
