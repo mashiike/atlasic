@@ -1,14 +1,129 @@
-## ATLASIC - A2A Toolkit Library to build Agentic Service for Infrastructure on Cloud
+# ATLASIC
 
-## memo 
+[![Go Reference](https://pkg.go.dev/badge/github.com/mashiike/atlasic.svg)](https://pkg.go.dev/github.com/mashiike/atlasic)
+[![Go Report Card](https://goreportcard.com/badge/github.com/mashiike/atlasic)](https://goreportcard.com/report/github.com/mashiike/atlasic)
 
-古いATLASICからの移行。
-別で検討してたagentstateから部分的に移植して方向転換。
+ATLASIC (A2A Toolkit Library to build Agent Service for Infrastructure on Cloud) is a Go library implementing the Agent-to-Agent (A2A) communication protocol. It provides a complete toolkit for building HTTP-based agent services with standardized messaging, task management, and event streaming capabilities.
 
-全体的にはAgentServiceの実態は スーパーバイザーAgent で ReAct(Reasoning and Acting)を行う。
-RegisterAgentで登録された専門Agentにスーパーバイザーが委譲する。
-スーパーバイザーはdelegate_to_agentのToolを持つ
+## Features
 
-多分ConversationHistoryとGetTaskで行ける
+- **A2A Protocol Implementation**: Full compliance with Agent-to-Agent communication specification
+- **HTTP Server**: Ready-to-use server with JSON-RPC and Server-Sent Events
+- **Storage Backends**: Local filesystem and AWS S3 adapters
+- **Event Sourcing**: Complete task history with optimistic concurrency control
+- **Streaming Support**: Real-time agent communication with SSE
+- **Content Negotiation**: Flexible output format handling
 
-現状は、まだ移植、統合途中
+## Quick Start
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+    
+    "github.com/mashiike/atlasic"
+    "github.com/mashiike/atlasic/a2a"
+)
+
+func main() {
+    // Define your agent
+    agent := atlasic.NewAgent(
+        a2a.AgentMetadata{
+            Provider: "example-org",
+            Version:  "1.0.0",
+        },
+        func(ctx context.Context, handle atlasic.TaskHandle) error {
+            // Add your agent logic here
+            return handle.AddMessage(ctx, []a2a.Part{
+                a2a.NewTextPart("Hello from my agent!"),
+            })
+        },
+    )
+
+    // Start server
+    server := &atlasic.Server{
+        Addr:  ":8080",
+        Agent: agent,
+    }
+    
+    log.Fatal(server.RunWithContext(context.Background()))
+}
+```
+
+## Storage Options
+
+### Local Development
+
+```go
+// Uses local filesystem storage (default)
+server := &atlasic.Server{
+    Addr:  ":8080",
+    Agent: agent,
+}
+```
+
+### AWS S3 Storage
+
+```go
+import "github.com/mashiike/atlasic/awsadp"
+
+storage := awsadp.NewS3Storage(awsadp.S3StorageConfig{
+    Client: s3Client,
+    Bucket: "my-atlasic-bucket",
+})
+
+server := &atlasic.Server{
+    Addr:    ":8080",
+    Agent:   agent,
+    Storage: storage,
+}
+```
+
+## API Usage
+
+### Send Message
+
+```bash
+curl -X POST http://localhost:8080/message/send \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": {
+      "messageId": "msg-1",
+      "role": "user",
+      "parts": [{"kind": "text", "text": "Hello"}]
+    }
+  }'
+```
+
+### Stream Messages
+
+```bash
+curl -N http://localhost:8080/message/stream \
+  -H "Accept: text/event-stream" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": {
+      "messageId": "msg-2", 
+      "role": "user",
+      "parts": [{"kind": "text", "text": "Hello"}]
+    }
+  }'
+```
+
+## Testing
+
+```bash
+# Run tests
+go test ./...
+
+# Run integration tests with minio
+docker-compose -f docker-compose.test.yml up -d
+go test ./awsadp -v
+docker-compose -f docker-compose.test.yml down
+```
+
+## License
+
+MIT License. See [LICENSE](LICENSE) for details.
