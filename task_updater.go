@@ -125,10 +125,6 @@ func (tu *TaskUpdater) GetExpectedVersion() uint64 {
 	return tu.initialVersion
 }
 
-// GetNewVersion returns the version that the task should have after applying all pending events
-func (tu *TaskUpdater) GetNewVersion() uint64 {
-	return tu.initialVersion + uint64(len(tu.pendingEvents))
-}
 
 // Event Sourcing helper methods for AgentService
 
@@ -148,7 +144,7 @@ func (s *AgentService) applyTaskUpdates(ctx context.Context, updater *TaskUpdate
 	}
 
 	// Save task snapshot with version control
-	if err := s.Storage.SaveTask(ctx, task, updater.GetExpectedVersion(), updater.GetNewVersion()); err != nil {
+	if err := s.Storage.SaveTask(ctx, task, updater.GetExpectedVersion(), newEventVersion); err != nil {
 		return fmt.Errorf("failed to save task snapshot: %w", err)
 	}
 

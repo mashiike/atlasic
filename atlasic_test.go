@@ -505,7 +505,7 @@ func TestA2A_ContextContinuation(t *testing.T) {
 	mockStorage.EXPECT().Append(gomock.Any(), "existing-context-001", "new-task-002", uint64(0), gomock.Any()).
 		Return(uint64(2), nil)
 
-	mockStorage.EXPECT().SaveTask(gomock.Any(), gomock.Any(), uint64(0), uint64(1)).
+	mockStorage.EXPECT().SaveTask(gomock.Any(), gomock.Any(), uint64(0), uint64(2)).
 		Return(nil)
 
 	// Mock final task retrieval
@@ -625,7 +625,7 @@ func TestA2A_ContextContinuation_ActiveTaskFound(t *testing.T) {
 		Return(uint64(3), nil)
 
 	// Expect SaveTask call from TaskUpdater for saving updated task
-	mockStorage.EXPECT().SaveTask(gomock.Any(), gomock.Any(), uint64(1), uint64(2)).
+	mockStorage.EXPECT().SaveTask(gomock.Any(), gomock.Any(), uint64(1), uint64(3)).
 		Return(nil)
 
 	// Expect final GetTask call to retrieve updated task for result
@@ -779,7 +779,7 @@ func TestA2A_NewConversation(t *testing.T) {
 	mockStorage.EXPECT().Append(gomock.Any(), "new-context-001", "new-task-001", uint64(0), gomock.Any()).
 		Return(uint64(2), nil)
 
-	mockStorage.EXPECT().SaveTask(gomock.Any(), gomock.Any(), uint64(0), uint64(1)).
+	mockStorage.EXPECT().SaveTask(gomock.Any(), gomock.Any(), uint64(0), uint64(2)).
 		Return(nil)
 
 	// Mock final task retrieval
