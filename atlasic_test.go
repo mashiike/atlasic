@@ -1207,7 +1207,7 @@ func TestA2A_MessageSendConfigurationHistoryLength(t *testing.T) {
 			// Mock storage operations for new task creation
 			mockStorage.EXPECT().Append(gomock.Any(), "config-test-context", "config-test-task", uint64(0), gomock.Any()).
 				Return(uint64(2), nil)
-			mockStorage.EXPECT().SaveTask(gomock.Any(), gomock.Any(), uint64(0), uint64(1)).
+			mockStorage.EXPECT().SaveTask(gomock.Any(), gomock.Any(), uint64(0), uint64(2)).
 				Return(nil)
 
 			// Mock final task retrieval
@@ -1651,7 +1651,7 @@ func TestA2A_AuthRequiredState(t *testing.T) {
 	// Mock storage operations for task creation
 	mockStorage.EXPECT().Append(gomock.Any(), "auth-context", "auth-task", uint64(0), gomock.Any()).
 		Return(uint64(2), nil)
-	mockStorage.EXPECT().SaveTask(gomock.Any(), gomock.Any(), uint64(0), uint64(1)).
+	mockStorage.EXPECT().SaveTask(gomock.Any(), gomock.Any(), uint64(0), uint64(2)).
 		Return(nil)
 
 	// Mock final task retrieval with auth-required state
