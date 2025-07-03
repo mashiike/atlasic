@@ -697,6 +697,33 @@ func (s *AgentService) TaskResubscription(ctx context.Context, params a2a.TaskID
 
 // findActiveTaskByContextID searches for a non-terminal task within the specified context
 func (s *AgentService) findActiveTaskByContextID(ctx context.Context, contextID string) (*a2a.Task, error) {
+	// Use optimized TaskLister interface if available
+	if lister, ok := s.Storage.(TaskLister); ok {
+		activeTasks, _, err := lister.ListActiveTasksByContext(ctx, contextID)
+		if err != nil {
+			if errors.Is(err, ErrContextNotFound) {
+				return nil, nil // Context doesn't exist = no active tasks
+			}
+			return nil, err
+		}
+
+		switch len(activeTasks) {
+		case 0:
+			return nil, nil // No active tasks found
+		case 1:
+			return activeTasks[0], nil // Single active task found
+		default:
+			// A2A specification: Multiple active tasks in context is an error
+			return nil, a2a.NewJSONRPCError(a2a.ErrorCodeInvalidParams, map[string]string{
+				"reason":          "Multiple active tasks found in context",
+				"contextId":       contextID,
+				"activeTaskCount": fmt.Sprintf("%d", len(activeTasks)),
+				"suggestion":      "Complete or cancel existing tasks before sending new messages",
+			})
+		}
+	}
+
+	// Fallback: use standard interface with filtering
 	tasks, _, err := s.Storage.ListTasksByContext(ctx, contextID, HistoryLengthAll)
 	if err != nil {
 		if errors.Is(err, ErrContextNotFound) {
