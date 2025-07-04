@@ -153,6 +153,7 @@ const (
 	ErrorCodeUnsupportedOperation         = -32004
 	ErrorCodeContentTypeNotSupported      = -32005
 	ErrorCodeInvalidAgentResponse         = -32006
+	ErrorCodeUnauthorized                 = -32007
 	ErrorCodeBlockingNotAllowed           = -32021
 )
 
@@ -181,6 +182,8 @@ func ErrorCodeText(code int) string {
 		return "Incompatible content types"
 	case ErrorCodeInvalidAgentResponse:
 		return "Invalid agent response"
+	case ErrorCodeUnauthorized:
+		return "Authentication required"
 	case ErrorCodeBlockingNotAllowed:
 		return "Blocking mode is not supported for streaming messages"
 	default:

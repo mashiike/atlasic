@@ -9,6 +9,7 @@ ATLASIC (A2A Toolkit Library to build Agent Service for Infrastructure on Cloud)
 
 - **A2A Protocol Implementation**: Full compliance with Agent-to-Agent communication specification
 - **HTTP Server**: Ready-to-use server with JSON-RPC and Server-Sent Events
+- **Authentication**: Built-in API Key and JWT authenticators with custom authentication support
 - **Storage Backends**: Local filesystem and AWS S3 adapters
 - **Job Queue**: In-memory and AWS SQS adapters for distributed processing
 - **Event Sourcing**: Complete task history with optimistic concurrency control
@@ -98,6 +99,103 @@ server := &atlasic.Server{
     Storage:  storage,
     JobQueue: jobQueue,
 }
+```
+
+## Authentication
+
+ATLASIC supports flexible authentication through the `transport.Authenticator` interface. Two built-in authenticators are provided:
+
+### API Key Authentication
+
+Simple API key authentication for basic security:
+
+```go
+server := &atlasic.Server{
+    Addr:  ":8080",
+    Agent: agent,
+    Authenticator: atlasic.StaticAPIKeyAuthenticator{
+        APIKey:     "your-secret-api-key",
+        HeaderName: "X-API-Key", // Optional, defaults to "X-API-Key"
+    },
+}
+```
+
+**Usage:**
+```bash
+curl -X POST http://localhost:8080/ \
+  -H "X-API-Key: your-secret-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "method": "message.send", "params": {...}}'
+```
+
+### JWT Authentication
+
+Production-ready JWT authentication with audience and expiration validation:
+
+```go
+import "github.com/golang-jwt/jwt/v5"
+
+auth := atlasic.NewJWTAuthenticator([]byte("your-secret-key")).
+    WithAudience("your-service-name").
+    WithValidateFunc(func(claims jwt.MapClaims) error {
+        // Custom validation logic
+        if role, ok := claims["role"].(string); !ok || role != "admin" {
+            return errors.New("admin role required")
+        }
+        return nil
+    })
+
+server := &atlasic.Server{
+    Addr:          ":8080",
+    Agent:         agent,
+    Authenticator: auth,
+}
+```
+
+**Usage:**
+```bash
+curl -X POST http://localhost:8080/ \
+  -H "Authorization: Bearer your-jwt-token" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "method": "message.send", "params": {...}}'
+```
+
+### Custom Authentication
+
+Implement your own authenticator by satisfying the `transport.Authenticator` interface:
+
+```go
+type CustomAuthenticator struct {
+    // your fields
+}
+
+func (c *CustomAuthenticator) Authenticate(ctx context.Context, r *http.Request) (*http.Request, error) {
+    // Your authentication logic
+    // Return modified request with authentication context
+}
+
+func (c *CustomAuthenticator) GetSecuritySchemes() map[string]a2a.SecurityScheme {
+    // Return security scheme definition for AgentCard
+}
+
+func (c *CustomAuthenticator) GetSecurityRequirements() []map[string][]string {
+    // Return security requirements for AgentCard
+}
+```
+
+### Accessing Authentication Context
+
+In your agent implementation, you can access authentication information:
+
+```go
+// For JWT authentication
+if claims, ok := atlasic.GetJWTClaims(ctx); ok {
+    userID, _ := atlasic.GetJWTSubject(ctx)
+    // Use claims and userID
+}
+
+// For custom authentication
+// Access your custom context values using context.Value()
 ```
 
 ## API Usage

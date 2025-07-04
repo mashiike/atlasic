@@ -1123,6 +1123,10 @@ type Server struct {
 	// This field is required and cannot be nil.
 	Agent Agent
 
+	// Authenticator specifies the authentication provider for the server.
+	// If nil, no authentication is required.
+	Authenticator transport.Authenticator
+
 	// Internal fields
 	agentService *AgentService
 	httpServer   *http.Server
@@ -1130,14 +1134,7 @@ type Server struct {
 }
 
 // Run starts the server and blocks until the server shuts down.
-// This is equivalent to ListenAndServe().
 func (s *Server) Run() error {
-	return s.ListenAndServe()
-}
-
-// ListenAndServe listens on the TCP network address s.Addr and then
-// handles requests on incoming connections.
-func (s *Server) ListenAndServe() error {
 	return s.RunWithContext(context.Background())
 }
 
@@ -1243,7 +1240,12 @@ func (s *Server) initialize() error {
 
 	// Create HTTP server if not already initialized
 	if s.httpServer == nil {
-		handler := transport.NewHandler(s.agentService)
+		var handlerOptions []transport.HandlerOption
+		if s.Authenticator != nil {
+			handlerOptions = append(handlerOptions, transport.WithAuthenticator(s.Authenticator))
+		}
+		
+		handler := transport.NewHandler(s.agentService, handlerOptions...)
 		s.httpServer = &http.Server{
 			Addr:              s.Addr,
 			Handler:           handler,

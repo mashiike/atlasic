@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -26,6 +27,8 @@ type handlerConfig struct {
 	agentCardPath        string
 	agentCardCacheMaxAge int
 	logger               *slog.Logger // Optional logger for debug output
+	authenticator        Authenticator
+	authRequired         bool
 }
 
 // WithRPCPath sets the JSON-RPC endpoint path (default: "/")
@@ -46,6 +49,14 @@ func WithAgentCardPath(path string) HandlerOption {
 func WithAgentCardCacheMaxAge(seconds int) HandlerOption {
 	return func(c *handlerConfig) {
 		c.agentCardCacheMaxAge = seconds
+	}
+}
+
+// WithAuthenticator sets the authenticator for the handler
+func WithAuthenticator(auth Authenticator) HandlerOption {
+	return func(c *handlerConfig) {
+		c.authenticator = auth
+		c.authRequired = true
 	}
 }
 
@@ -181,7 +192,7 @@ func clientAcceptsSSE(acceptHeader string, forValidSSEMethod bool) bool {
 
 // ServeHTTP implements http.Handler interface
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Handle Agent Card endpoint
+	// Handle Agent Card endpoint (no authentication required)
 	if r.Method == http.MethodGet && r.URL.Path == h.config.agentCardPath {
 		h.config.logger.Debug("Handling agent card request", "path", r.URL.Path)
 		h.handleWellKnownAgentCard(w, r)
@@ -198,6 +209,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
+	}
+
+	// Authentication check for JSON-RPC requests
+	if h.config.authenticator != nil {
+		newReq, err := h.config.authenticator.Authenticate(r.Context(), r)
+		if err != nil {
+			h.writeAuthError(w, err)
+			return
+		}
+		r = newReq
 	}
 
 	// Parse JSON-RPC request
@@ -418,6 +439,12 @@ func (h *Handler) handleWellKnownAgentCard(w http.ResponseWriter, r *http.Reques
 		agentCard.URL = finalURL
 	}
 
+	// Add authentication information if authenticator is configured
+	if h.config.authenticator != nil {
+		agentCard.SecuritySchemes = h.config.authenticator.GetSecuritySchemes()
+		agentCard.Security = h.config.authenticator.GetSecurityRequirements()
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	if h.config.agentCardCacheMaxAge > 0 {
 		w.Header().Set("Cache-Control",
@@ -575,4 +602,41 @@ func WriteSSEError(w http.ResponseWriter, id interface{}, code int, message stri
 	flusher.Flush()
 
 	return nil
+}
+
+// writeAuthError writes an authentication error response
+func (h *Handler) writeAuthError(w http.ResponseWriter, err error) {
+	var authErr *AuthError
+	if errors.As(err, &authErr) {
+		// Authentication error - return 401 with proper error format
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		
+		errorResp := a2a.NewJSONRPCErrorResponse(
+			a2a.ErrorCodeUnauthorized,
+			authErr.Message,
+			map[string]interface{}{
+				"code":   authErr.Code,
+				"scheme": authErr.Scheme,
+			},
+			nil,
+		)
+		
+		respBytes, _ := json.Marshal(errorResp)
+		w.Write(respBytes)
+	} else {
+		// Generic authentication error
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		
+		errorResp := a2a.NewJSONRPCErrorResponse(
+			a2a.ErrorCodeUnauthorized,
+			"Authentication required",
+			nil,
+			nil,
+		)
+		
+		respBytes, _ := json.Marshal(errorResp)
+		w.Write(respBytes)
+	}
 }
