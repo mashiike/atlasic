@@ -844,7 +844,7 @@ func (s *AgentService) processMessage(ctx context.Context, params a2a.MessageSen
 		// Start completely new conversation
 		contextID = idGen.GenerateContextID()
 	}
-	
+
 	// Create new task - generate ID and prepare message
 	taskID = idGen.GenerateTaskID()
 	userMessage := a2a.NewMessage(
@@ -855,7 +855,7 @@ func (s *AgentService) processMessage(ctx context.Context, params a2a.MessageSen
 	userMessage.ReferenceTaskIDs = params.Message.ReferenceTaskIDs // Copy reference task IDs if any
 	userMessage.Extensions = params.Message.Extensions             // Copy extensions if any
 	userMessage.Metadata = params.Message.Metadata                 // Copy metadata if any
-	
+
 	// Create new task using TaskUpdater
 	_, err = s.createNewTask(ctx, taskID, contextID, userMessage)
 	if err != nil {
@@ -1074,7 +1074,8 @@ func (s *AgentService) GetAgentCard(ctx context.Context) (*a2a.AgentCard, error)
 		Name:               meta.Name,
 		Version:            meta.Version, // Configurable version from AgentService
 		Description:        meta.Description,
-		URL:                s.BaseEndpoint, // Configurable base endpoint from AgentService
+		URL:                s.BaseEndpoint,      // Configurable base endpoint from AgentService
+		ProtocolVersion:    a2a.ProtocolVersion, // Required A2A protocol version
 		Skills:             meta.Skills,
 		DefaultInputModes:  meta.DefaultInputModes,
 		DefaultOutputModes: meta.DefaultOutputModes,
@@ -1244,7 +1245,7 @@ func (s *Server) initialize() error {
 		if s.Authenticator != nil {
 			handlerOptions = append(handlerOptions, transport.WithAuthenticator(s.Authenticator))
 		}
-		
+
 		handler := transport.NewHandler(s.agentService, handlerOptions...)
 		s.httpServer = &http.Server{
 			Addr:              s.Addr,

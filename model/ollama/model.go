@@ -21,7 +21,7 @@ func init() {
 	if ollamaHost := os.Getenv("OLLAMA_HOST"); ollamaHost != "" {
 		endpoint = ollamaHost + "/api/chat"
 	}
-	
+
 	p := &ModelProvider{
 		Endpoint: endpoint,
 	}

@@ -611,7 +611,7 @@ func (h *Handler) writeAuthError(w http.ResponseWriter, err error) {
 		// Authentication error - return 401 with proper error format
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		
+
 		errorResp := a2a.NewJSONRPCErrorResponse(
 			a2a.ErrorCodeUnauthorized,
 			authErr.Message,
@@ -621,21 +621,21 @@ func (h *Handler) writeAuthError(w http.ResponseWriter, err error) {
 			},
 			nil,
 		)
-		
+
 		respBytes, _ := json.Marshal(errorResp)
 		w.Write(respBytes)
 	} else {
 		// Generic authentication error
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		
+
 		errorResp := a2a.NewJSONRPCErrorResponse(
 			a2a.ErrorCodeUnauthorized,
 			"Authentication required",
 			nil,
 			nil,
 		)
-		
+
 		respBytes, _ := json.Marshal(errorResp)
 		w.Write(respBytes)
 	}

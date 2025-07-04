@@ -448,6 +448,11 @@ func TestA2A_AgentCard(t *testing.T) {
 		t.Errorf("Expected description 'A test agent for unit testing', got '%s'", card.Description)
 	}
 
+	// Verify protocol version is set correctly
+	if card.ProtocolVersion != a2a.ProtocolVersion {
+		t.Errorf("Expected protocol version '%s', got '%s'", a2a.ProtocolVersion, card.ProtocolVersion)
+	}
+
 	if len(card.Skills) != 1 {
 		t.Errorf("Expected 1 skill, got %d", len(card.Skills))
 	}

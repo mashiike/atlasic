@@ -103,7 +103,7 @@ func TestStaticAPIKeyAuthenticator_SecuritySchemes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			schemes := tt.auth.GetSecuritySchemes()
-			
+
 			apiKeyScheme, exists := schemes["apiKey"]
 			if !exists {
 				t.Errorf("expected apiKey scheme to exist")
@@ -127,7 +127,7 @@ func TestStaticAPIKeyAuthenticator_SecuritySchemes(t *testing.T) {
 
 func TestJWTAuthenticator(t *testing.T) {
 	secretKey := []byte("test-secret-key")
-	
+
 	// Create a valid JWT token
 	createToken := func(claims jwt.MapClaims) string {
 		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -143,8 +143,8 @@ func TestJWTAuthenticator(t *testing.T) {
 		checkClaims func(ctx context.Context) error
 	}{
 		{
-			name:  "valid JWT token",
-			auth:  NewJWTAuthenticator(secretKey),
+			name: "valid JWT token",
+			auth: NewJWTAuthenticator(secretKey),
 			token: createToken(jwt.MapClaims{
 				"sub": "user123",
 				"exp": time.Now().Add(time.Hour).Unix(),
@@ -159,8 +159,8 @@ func TestJWTAuthenticator(t *testing.T) {
 			},
 		},
 		{
-			name:  "expired JWT token",
-			auth:  NewJWTAuthenticator(secretKey),
+			name: "expired JWT token",
+			auth: NewJWTAuthenticator(secretKey),
 			token: createToken(jwt.MapClaims{
 				"sub": "user123",
 				"exp": time.Now().Add(-time.Hour).Unix(), // Expired
@@ -268,7 +268,7 @@ func TestJWTAuthenticator(t *testing.T) {
 
 func TestJWTAuthenticator_MissingBearer(t *testing.T) {
 	auth := NewJWTAuthenticator([]byte("secret"))
-	
+
 	tests := []struct {
 		name   string
 		header string

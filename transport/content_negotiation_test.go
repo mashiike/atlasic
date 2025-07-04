@@ -82,81 +82,81 @@ func TestMatchesOutputMode(t *testing.T) {
 
 func TestFindCompatibleOutputModes(t *testing.T) {
 	tests := []struct {
-		name          string
-		acceptedModes []string
+		name           string
+		acceptedModes  []string
 		supportedModes []string
-		expected      []string
-		expectError   bool
+		expected       []string
+		expectError    bool
 	}{
 		{
-			name:          "Exact match single mode",
-			acceptedModes: []string{"text/plain"},
+			name:           "Exact match single mode",
+			acceptedModes:  []string{"text/plain"},
 			supportedModes: []string{"text/plain", "application/json"},
-			expected:      []string{"text/plain"},
-			expectError:   false,
+			expected:       []string{"text/plain"},
+			expectError:    false,
 		},
 		{
-			name:          "Multiple exact matches",
-			acceptedModes: []string{"text/plain", "application/json"},
+			name:           "Multiple exact matches",
+			acceptedModes:  []string{"text/plain", "application/json"},
 			supportedModes: []string{"text/plain", "application/json", "text/markdown"},
-			expected:      []string{"text/plain", "application/json"},
-			expectError:   false,
+			expected:       []string{"text/plain", "application/json"},
+			expectError:    false,
 		},
 		{
-			name:          "Wildcard * matches all",
-			acceptedModes: []string{"*"},
+			name:           "Wildcard * matches all",
+			acceptedModes:  []string{"*"},
 			supportedModes: []string{"text/plain", "application/json"},
-			expected:      []string{"text/plain", "application/json"},
-			expectError:   false,
+			expected:       []string{"text/plain", "application/json"},
+			expectError:    false,
 		},
 		{
-			name:          "Wildcard */* matches all",
-			acceptedModes: []string{"*/*"},
+			name:           "Wildcard */* matches all",
+			acceptedModes:  []string{"*/*"},
 			supportedModes: []string{"text/plain", "application/json"},
-			expected:      []string{"text/plain", "application/json"},
-			expectError:   false,
+			expected:       []string{"text/plain", "application/json"},
+			expectError:    false,
 		},
 		{
-			name:          "Type wildcard text/* matches text types",
-			acceptedModes: []string{"text/*"},
+			name:           "Type wildcard text/* matches text types",
+			acceptedModes:  []string{"text/*"},
 			supportedModes: []string{"text/plain", "text/markdown", "application/json"},
-			expected:      []string{"text/plain", "text/markdown"},
-			expectError:   false,
+			expected:       []string{"text/plain", "text/markdown"},
+			expectError:    false,
 		},
 		{
-			name:          "Mixed patterns",
-			acceptedModes: []string{"text/*", "application/json"},
+			name:           "Mixed patterns",
+			acceptedModes:  []string{"text/*", "application/json"},
 			supportedModes: []string{"text/plain", "text/markdown", "application/json", "image/png"},
-			expected:      []string{"text/plain", "text/markdown", "application/json"},
-			expectError:   false,
+			expected:       []string{"text/plain", "text/markdown", "application/json"},
+			expectError:    false,
 		},
 		{
-			name:          "No matches",
-			acceptedModes: []string{"text/plain"},
+			name:           "No matches",
+			acceptedModes:  []string{"text/plain"},
 			supportedModes: []string{"application/json", "image/png"},
-			expected:      nil,
-			expectError:   true,
+			expected:       nil,
+			expectError:    true,
 		},
 		{
-			name:          "Empty accepted defaults to */*",
-			acceptedModes: []string{},
+			name:           "Empty accepted defaults to */*",
+			acceptedModes:  []string{},
 			supportedModes: []string{"text/plain", "application/json"},
-			expected:      []string{"text/plain", "application/json"},
-			expectError:   false,
+			expected:       []string{"text/plain", "application/json"},
+			expectError:    false,
 		},
 		{
-			name:          "Priority order preference",
-			acceptedModes: []string{"application/json", "text/*"},
+			name:           "Priority order preference",
+			acceptedModes:  []string{"application/json", "text/*"},
 			supportedModes: []string{"text/plain", "application/json"},
-			expected:      []string{"text/plain", "application/json"},
-			expectError:   false,
+			expected:       []string{"text/plain", "application/json"},
+			expectError:    false,
 		},
 		{
-			name:          "No duplicates",
-			acceptedModes: []string{"text/*", "text/plain"},
+			name:           "No duplicates",
+			acceptedModes:  []string{"text/*", "text/plain"},
 			supportedModes: []string{"text/plain"},
-			expected:      []string{"text/plain"},
-			expectError:   false,
+			expected:       []string{"text/plain"},
+			expectError:    false,
 		},
 	}
 

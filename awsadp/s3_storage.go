@@ -40,7 +40,7 @@ func NewS3Storage(config S3StorageConfig) *S3Storage {
 
 func (s *S3Storage) GetTask(ctx context.Context, taskID string, historyLength int) (*a2a.Task, uint64, error) {
 	key := s.getTaskKey(taskID)
-	
+
 	result, err := s.client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
@@ -124,7 +124,7 @@ func (s *S3Storage) SaveTask(ctx context.Context, task *a2a.Task, expectedVersio
 
 func (s *S3Storage) ListTasksByContext(ctx context.Context, contextID string, historyLength int) ([]*a2a.Task, []uint64, error) {
 	prefix := s.getContextPrefix(contextID)
-	
+
 	result, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
 		Bucket: aws.String(s.bucket),
 		Prefix: aws.String(prefix),
@@ -222,7 +222,7 @@ func (s *S3Storage) Append(ctx context.Context, contextID string, taskID string,
 
 func (s *S3Storage) Load(ctx context.Context, contextID string, taskID string, from uint64, limit int) ([]a2a.StreamResponse, uint64, error) {
 	key := s.getEventsKey(contextID, taskID)
-	
+
 	result, err := s.client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
@@ -282,7 +282,7 @@ func (s *S3Storage) SaveTaskPushNotificationConfig(ctx context.Context, config a
 
 func (s *S3Storage) GetTaskPushNotificationConfig(ctx context.Context, taskID, configID string) (a2a.TaskPushNotificationConfig, error) {
 	key := s.getPushNotificationConfigKey(taskID, configID)
-	
+
 	result, err := s.client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
@@ -305,7 +305,7 @@ func (s *S3Storage) GetTaskPushNotificationConfig(ctx context.Context, taskID, c
 
 func (s *S3Storage) ListTaskPushNotificationConfig(ctx context.Context, taskID string) ([]a2a.TaskPushNotificationConfig, error) {
 	prefix := s.getPushNotificationConfigPrefix(taskID)
-	
+
 	result, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
 		Bucket: aws.String(s.bucket),
 		Prefix: aws.String(prefix),
@@ -332,7 +332,7 @@ func (s *S3Storage) ListTaskPushNotificationConfig(ctx context.Context, taskID s
 
 func (s *S3Storage) DeleteTaskPushNotificationConfig(ctx context.Context, taskID, configID string) error {
 	key := s.getPushNotificationConfigKey(taskID, configID)
-	
+
 	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
@@ -391,7 +391,7 @@ func (s *S3Storage) getPushNotificationConfigPrefix(taskID string) string {
 func (s *S3Storage) extractTaskIDFromContextKey(key string) string {
 	// Extract from "{prefix}/contexts/{contextID}/{taskID}.txt" or "contexts/{contextID}/{taskID}.txt"
 	parts := strings.Split(key, "/")
-	
+
 	// Find the "contexts" part and extract taskID from 2 positions after it
 	for i, part := range parts {
 		if part == "contexts" && i+2 < len(parts) {
@@ -405,7 +405,7 @@ func (s *S3Storage) extractTaskIDFromContextKey(key string) string {
 func (s *S3Storage) extractConfigIDFromKey(key string) string {
 	// Extract from "{prefix}/push-configs/{taskID}/{configID}.json" or "push-configs/{taskID}/{configID}.json"
 	parts := strings.Split(key, "/")
-	
+
 	// Find the "push-configs" part and extract configID from 2 positions after it
 	for i, part := range parts {
 		if part == "push-configs" && i+2 < len(parts) {

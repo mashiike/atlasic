@@ -125,7 +125,6 @@ func (tu *TaskUpdater) GetExpectedVersion() uint64 {
 	return tu.initialVersion
 }
 
-
 // Event Sourcing helper methods for AgentService
 
 // applyTaskUpdates applies the updates from TaskUpdater to storage (append events + save snapshot)

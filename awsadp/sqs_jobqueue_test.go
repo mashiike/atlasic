@@ -15,7 +15,7 @@ import (
 
 func createElasticMQClient(t *testing.T) *sqs.Client {
 	t.Helper()
-	
+
 	// ElasticMQ用の設定
 	customResolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
 		if service == sqs.ServiceID {
@@ -149,7 +149,7 @@ func TestSQSJobQueue_Integration(t *testing.T) {
 		randomPrefix, err := generateRandomPrefix()
 		require.NoError(t, err)
 		queueName := "test-queue-name-" + randomPrefix
-		
+
 		// Create queue first
 		_, err = client.CreateQueue(context.Background(), &sqs.CreateQueueInput{
 			QueueName: aws.String(queueName),

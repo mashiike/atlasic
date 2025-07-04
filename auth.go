@@ -101,14 +101,14 @@ func (s StaticAPIKeyAuthenticator) GetSecurityRequirements() []map[string][]stri
 type JWTAuthenticator struct {
 	// SecretKey is used for HMAC signing methods (HS256, HS384, HS512)
 	SecretKey []byte
-	
+
 	// SigningMethod specifies the JWT signing method (default: HS256)
 	SigningMethod jwt.SigningMethod
-	
+
 	// Audience specifies the expected audience (aud) claim
 	// If empty, audience validation is skipped
 	Audience string
-	
+
 	// ValidateFunc allows custom validation of JWT claims
 	// If nil, only signature, expiration, and audience are validated
 	ValidateFunc func(claims jwt.MapClaims) error
@@ -161,7 +161,7 @@ func (j *JWTAuthenticator) Authenticate(ctx context.Context, r *http.Request) (*
 	}
 
 	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-	
+
 	// Parse and validate JWT with standard claims validation
 	token, err := jwt.ParseWithClaims(tokenString, jwt.MapClaims{}, func(token *jwt.Token) (interface{}, error) {
 		// Verify signing method
@@ -245,7 +245,7 @@ func (j *JWTAuthenticator) Authenticate(ctx context.Context, r *http.Request) (*
 	// Add JWT claims to request context using typed keys
 	newCtx := context.WithValue(r.Context(), jwtContextKey{}, claims)
 	newCtx = context.WithValue(newCtx, jwtTokenContextKey{}, tokenString)
-	
+
 	return r.WithContext(newCtx), nil
 }
 

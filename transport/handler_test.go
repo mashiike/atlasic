@@ -279,6 +279,7 @@ func TestHandler_GetAgentCard(t *testing.T) {
 	expectedCard := &a2a.AgentCard{
 		Name:               "Test Agent",
 		Version:            "1.0.0",
+		ProtocolVersion:    a2a.ProtocolVersion,
 		Description:        "A test agent for unit testing",
 		URL:                "https://example.com/agent",
 		DefaultInputModes:  []string{"text"},
@@ -331,6 +332,7 @@ func TestHandler_GetAgentCard(t *testing.T) {
 
 	assert.Equal(t, "Test Agent", actualCard.Name)
 	assert.Equal(t, "1.0.0", actualCard.Version)
+	assert.Equal(t, a2a.ProtocolVersion, actualCard.ProtocolVersion)
 	assert.True(t, actualCard.Capabilities.Streaming)
 }
 
@@ -749,6 +751,7 @@ func TestHandler_WellKnownAgentCard(t *testing.T) {
 	expectedCard := &a2a.AgentCard{
 		Name:               "Test Agent",
 		Version:            "1.0.0",
+		ProtocolVersion:    a2a.ProtocolVersion,
 		Description:        "A test agent",
 		URL:                "https://example.com/api",
 		DefaultInputModes:  []string{"text"},
@@ -780,6 +783,7 @@ func TestHandler_WellKnownAgentCard(t *testing.T) {
 	// Verify agent card
 	assert.Equal(t, expectedCard.Name, response.Name)
 	assert.Equal(t, expectedCard.Version, response.Version)
+	assert.Equal(t, expectedCard.ProtocolVersion, response.ProtocolVersion)
 	assert.Equal(t, expectedCard.Description, response.Description)
 }
 
@@ -800,6 +804,7 @@ func TestHandler_WithCustomPaths(t *testing.T) {
 	expectedCard := &a2a.AgentCard{
 		Name:               "Custom Agent",
 		Version:            "2.0.0",
+		ProtocolVersion:    a2a.ProtocolVersion,
 		Description:        "Custom path agent",
 		URL:                "https://example.com/api/a2a",
 		DefaultInputModes:  []string{"text"},
@@ -847,6 +852,7 @@ func TestA2AMiddleware(t *testing.T) {
 	expectedCard := &a2a.AgentCard{
 		Name:               "Middleware Agent",
 		Version:            "1.0.0",
+		ProtocolVersion:    a2a.ProtocolVersion,
 		Description:        "Middleware test agent",
 		URL:                "https://example.com/api/a2a",
 		DefaultInputModes:  []string{"text"},

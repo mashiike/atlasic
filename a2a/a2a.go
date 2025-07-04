@@ -124,6 +124,11 @@ const (
 	SecurityTypeOpenIDConnect SecurityType = "openIdConnect"
 )
 
+// A2A Protocol Version
+const (
+	ProtocolVersion = "0.2.5"
+)
+
 // A2A method names
 const (
 	MethodSendMessage                      = "message/send"
@@ -371,10 +376,11 @@ type AgentInterface struct {
 
 // AgentCard conveys key information about an agent.
 type AgentCard struct {
-	Name                              string                    `json:"name"`        // Required
-	Version                           string                    `json:"version"`     // Required
-	Description                       string                    `json:"description"` // Required
-	URL                               string                    `json:"url"`         // Required
+	Name                              string                    `json:"name"`            // Required
+	Version                           string                    `json:"version"`         // Required
+	Description                       string                    `json:"description"`     // Required
+	URL                               string                    `json:"url"`             // Required
+	ProtocolVersion                   string                    `json:"protocolVersion"` // Required
 	IconURL                           string                    `json:"iconUrl,omitempty"`
 	DocumentationURL                  string                    `json:"documentationUrl,omitempty"`
 	PreferredTransport                string                    `json:"preferredTransport,omitempty"`   // New field

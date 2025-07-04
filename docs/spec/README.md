@@ -7,7 +7,8 @@ This directory contains a vendored version of the A2A (Agent-to-Agent) Protocol 
 The schema is taken from the official A2A repository:
 
 *   **Repository:** [https://github.com/a2aproject/A2A](https://github.com/a2aproject/A2A)
-*   **Commit:** `7fd0dcc6e43cc3ab53cb2f01e3885f2a756c6a09`
+*   **Version:** `v0.2.5`
+*   **Commit:** `22b52705a169123aa06cdf28261e12150ee5777f`
 *   **Original Path:** `specification/json/a2a.json`
 
 This library implements the A2A protocol based on the version of the schema at this specific commit.

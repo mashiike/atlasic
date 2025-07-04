@@ -20,11 +20,11 @@ type ClientOption func(*clientConfig)
 
 // clientConfig holds internal configuration for Client
 type clientConfig struct {
-	httpClient           *http.Client
-	rpcPath              string
-	agentCardPath        string
-	logger               *slog.Logger
-	userAgent            string
+	httpClient            *http.Client
+	rpcPath               string
+	agentCardPath         string
+	logger                *slog.Logger
+	userAgent             string
 	defaultRequestTimeout time.Duration
 }
 
@@ -130,8 +130,8 @@ func (c *Client) sendJSONRPCRequest(ctx context.Context, method string, params i
 		return nil, fmt.Errorf("failed to marshal JSON-RPC request: %w", err)
 	}
 
-	c.config.logger.Debug("Sending JSON-RPC request", 
-		"method", method, 
+	c.config.logger.Debug("Sending JSON-RPC request",
+		"method", method,
 		"url", reqURL,
 		"id", req.ID)
 
@@ -161,7 +161,7 @@ func (c *Client) sendJSONRPCRequest(ctx context.Context, method string, params i
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	c.config.logger.Debug("Received JSON-RPC response", 
+	c.config.logger.Debug("Received JSON-RPC response",
 		"status", httpResp.StatusCode,
 		"contentType", httpResp.Header.Get("Content-Type"),
 		"bodySize", len(respBody))

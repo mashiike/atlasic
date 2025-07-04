@@ -95,7 +95,7 @@ func (q *SQSJobQueue) Dequeue(ctx context.Context) (*atlasic.Job, error) {
 		}
 
 		message := result.Messages[0]
-		
+
 		// Parse job config from message body
 		var jobConfig atlasic.JobConfig
 		if err := json.Unmarshal([]byte(*message.Body), &jobConfig); err != nil {

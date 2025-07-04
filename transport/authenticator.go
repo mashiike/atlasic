@@ -13,11 +13,11 @@ type Authenticator interface {
 	// Authenticate verifies the authentication credentials in the request
 	// and returns a new request with authentication context added
 	Authenticate(ctx context.Context, r *http.Request) (*http.Request, error)
-	
+
 	// GetSecuritySchemes returns the security schemes supported by this authenticator
 	// This information is used to populate the AgentCard
 	GetSecuritySchemes() map[string]a2a.SecurityScheme
-	
+
 	// GetSecurityRequirements returns the security requirements for this authenticator
 	// This information is used to populate the AgentCard
 	GetSecurityRequirements() []map[string][]string
@@ -61,4 +61,3 @@ func NewAuthErrorWithScheme(code, message, scheme string) *AuthError {
 		Scheme:  scheme,
 	}
 }
-
