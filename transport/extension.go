@@ -110,20 +110,20 @@ func (b *AgentCardBuilder) AddExtensionField(key string, value any) error {
 	if isReservedField(key) {
 		return fmt.Errorf("cannot override reserved field: %s", key)
 	}
-	
+
 	b.extensions[key] = value
 	return nil
 }
 
 func (b *AgentCardBuilder) Build() (map[string]any, error) {
 	result := structToMap(b.base)
-	
+
 	maps.Copy(result, b.extensions)
-	
+
 	if err := b.validate(result); err != nil {
 		return nil, err
 	}
-	
+
 	return result, nil
 }
 
@@ -150,11 +150,11 @@ func structToMap(obj any) map[string]any {
 	result := make(map[string]any)
 	val := reflect.ValueOf(obj)
 	typ := reflect.TypeOf(obj)
-	
+
 	for i := 0; i < val.NumField(); i++ {
 		field := val.Field(i)
 		fieldType := typ.Field(i)
-		
+
 		jsonTag := fieldType.Tag.Get("json")
 		if jsonTag == "" {
 			jsonTag = fieldType.Name
@@ -168,12 +168,12 @@ func structToMap(obj any) map[string]any {
 				}
 			}
 		}
-		
+
 		if jsonTag != "-" {
 			result[jsonTag] = field.Interface()
 		}
 	}
-	
+
 	return result
 }
 

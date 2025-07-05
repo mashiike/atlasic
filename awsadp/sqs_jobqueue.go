@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -16,13 +17,15 @@ import (
 type SQSJobQueueConfig struct {
 	Client    *sqs.Client
 	QueueURL  string
-	QueueName string // QueueURL未指定時の自動生成用（Optional）
+	QueueName string       // QueueURL未指定時の自動生成用（Optional）
+	Logger    *slog.Logger // Optional logger, defaults to slog.Default()
 }
 
 // SQSJobQueue implements JobQueue interface using AWS SQS
 type SQSJobQueue struct {
 	client   *sqs.Client
 	queueURL string
+	logger   *slog.Logger
 }
 
 // NewSQSJobQueue creates a new SQS-based job queue
@@ -47,9 +50,15 @@ func NewSQSJobQueue(config SQSJobQueueConfig) (*SQSJobQueue, error) {
 		queueURL = *result.QueueUrl
 	}
 
+	logger := config.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	return &SQSJobQueue{
 		client:   config.Client,
 		queueURL: queueURL,
+		logger:   logger,
 	}, nil
 }
 
@@ -100,7 +109,9 @@ func (q *SQSJobQueue) Dequeue(ctx context.Context) (*atlasic.Job, error) {
 		var jobConfig atlasic.JobConfig
 		if err := json.Unmarshal([]byte(*message.Body), &jobConfig); err != nil {
 			// Invalid message, delete it to avoid infinite reprocessing
-			q.deleteMessage(context.Background(), *message.ReceiptHandle)
+			if deleteErr := q.deleteMessage(context.Background(), *message.ReceiptHandle); deleteErr != nil {
+				q.logger.Error("Failed to delete invalid message", "error", deleteErr, "receiptHandle", *message.ReceiptHandle)
+			}
 			continue
 		}
 

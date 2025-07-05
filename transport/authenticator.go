@@ -40,8 +40,8 @@ func (e *AuthError) Error() string {
 // Common auth error codes
 const (
 	AuthErrorCodeMissingCredentials = "missing_credentials"
-	AuthErrorCodeInvalidCredentials = "invalid_credentials"
-	AuthErrorCodeExpiredCredentials = "expired_credentials"
+	AuthErrorCodeInvalidCredentials = "invalid_credentials" // #nosec G101 - This is an error code constant, not a credential
+	AuthErrorCodeExpiredCredentials = "expired_credentials" // #nosec G101 - This is an error code constant, not a credential
 	AuthErrorCodeInsufficientScope  = "insufficient_scope"
 )
 

@@ -893,8 +893,9 @@ func (h *Handler) writeAuthError(w http.ResponseWriter, err error) {
 			nil,
 		)
 
-		respBytes, _ := json.Marshal(errorResp)
-		w.Write(respBytes)
+		if respBytes, err := json.Marshal(errorResp); err == nil {
+			w.Write(respBytes)
+		}
 	} else {
 		// Generic authentication error
 		w.Header().Set("Content-Type", "application/json")
@@ -907,7 +908,8 @@ func (h *Handler) writeAuthError(w http.ResponseWriter, err error) {
 			nil,
 		)
 
-		respBytes, _ := json.Marshal(errorResp)
-		w.Write(respBytes)
+		if respBytes, err := json.Marshal(errorResp); err == nil {
+			w.Write(respBytes)
+		}
 	}
 }

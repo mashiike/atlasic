@@ -22,6 +22,7 @@ linters:
         - fmt.Fprint
         - fmt.Fprintf
         - fmt.Fprintln
+        - (net/http.ResponseWriter).Write
 
     revive:
       max-open-files: 2048
