@@ -2,7 +2,6 @@ package atlasic
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -498,11 +497,7 @@ func TestA2A_ContextContinuation(t *testing.T) {
 		},
 	}
 
-	// Mock expectations
-	// First, findActiveTaskByContextID will be called to check for existing active tasks
-	mockStorage.EXPECT().ListTasksByContext(gomock.Any(), "existing-context-001", HistoryLengthAll).
-		Return([]*a2a.Task{}, []uint64{}, nil) // Return empty list (no active tasks)
-
+	// Mock expectations for new task creation
 	mockIDGen.EXPECT().GenerateTaskID().Return("new-task-002")
 	// Note: GenerateContextID should NOT be called since contextID is provided
 
@@ -565,8 +560,8 @@ func TestA2A_ContextContinuation(t *testing.T) {
 		result.Task.ID, result.Task.ContextID)
 }
 
-// TestA2A_ContextContinuation_ActiveTaskFound tests context continuation when active task exists
-func TestA2A_ContextContinuation_ActiveTaskFound(t *testing.T) {
+// TestA2A_ParallelFollowUpTask tests parallel follow-up task creation with existing contextID
+func TestA2A_ParallelFollowUpTask(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -580,14 +575,15 @@ func TestA2A_ContextContinuation_ActiveTaskFound(t *testing.T) {
 	agentService.SetIDGenerator(mockIDGen)
 	agentService.DisablePushNotifications = true
 
-	// Test message with contextID but no taskID (should find existing active task)
+	// Test message with contextID but no taskID (should create new parallel task)
 	message := a2a.Message{
 		Kind:      a2a.KindMessage,
 		MessageID: "msg-002",
 		ContextID: "existing-context-001", // Existing context
-		// TaskID is empty - should find existing active task
-		Role:  a2a.RoleUser,
-		Parts: []a2a.Part{a2a.NewTextPart("Continue with the active task")},
+		// TaskID is empty - should create new parallel task
+		Role:             a2a.RoleUser,
+		Parts:            []a2a.Part{a2a.NewTextPart("Parallel follow-up task")},
+		ReferenceTaskIDs: []string{"existing-task-001"}, // Reference to original task
 	}
 
 	params := a2a.MessageSendParams{
@@ -597,64 +593,39 @@ func TestA2A_ContextContinuation_ActiveTaskFound(t *testing.T) {
 		},
 	}
 
-	// Create an existing active task (input-required state)
-	existingTask := &a2a.Task{
-		Kind:      a2a.KindTask,
-		ID:        "existing-task-001",
-		ContextID: "existing-context-001",
-		Status: a2a.TaskStatus{
-			State: a2a.TaskStateInputRequired, // Non-terminal, interrupted state
-		},
-		History: []a2a.Message{
-			{
-				Kind:      a2a.KindMessage,
-				MessageID: "old-msg-001",
-				ContextID: "existing-context-001",
-				TaskID:    "existing-task-001",
-				Role:      a2a.RoleUser,
-				Parts:     []a2a.Part{a2a.NewTextPart("Original message")},
-			},
-		},
-	}
+	// Mock ID generation for new parallel task
+	mockIDGen.EXPECT().GenerateTaskID().Return("parallel-task-002")
 
-	// Mock expectations
-	mockStorage.EXPECT().ListTasksByContext(gomock.Any(), "existing-context-001", HistoryLengthAll).
-		Return([]*a2a.Task{existingTask}, []uint64{1}, nil) // Return active task
+	// Mock expectations for new task creation
+	mockStorage.EXPECT().Append(gomock.Any(), "existing-context-001", "parallel-task-002", gomock.Any(), gomock.Any()).
+		Return(uint64(1), nil)
 
-	// Expect GetTask call from TaskUpdater.addMessage for retrieving current task state
-	mockStorage.EXPECT().GetTask(gomock.Any(), "existing-task-001", HistoryLengthAll).
-		Return(existingTask, uint64(1), nil)
-
-	// Expect addMessage call for adding message to existing task
-	mockStorage.EXPECT().Append(gomock.Any(), "existing-context-001", "existing-task-001", gomock.Any(), gomock.Any()).
-		Return(uint64(3), nil)
-
-	// Expect SaveTask call from TaskUpdater for saving updated task
-	mockStorage.EXPECT().SaveTask(gomock.Any(), gomock.Any(), uint64(1), uint64(3)).
+	// Mock SaveTask for new task creation
+	mockStorage.EXPECT().SaveTask(gomock.Any(), gomock.Any(), uint64(0), uint64(1)).
 		Return(nil)
 
-	// Expect final GetTask call to retrieve updated task for result
-	updatedTask := &a2a.Task{
+	// Expect final GetTask call to retrieve created task for result
+	newParallelTask := &a2a.Task{
 		Kind:      a2a.KindTask,
-		ID:        "existing-task-001",
+		ID:        "parallel-task-002",
 		ContextID: "existing-context-001",
 		Status: a2a.TaskStatus{
-			State: a2a.TaskStateInputRequired,
+			State: a2a.TaskStateSubmitted,
 		},
 		History: []a2a.Message{
-			existingTask.History[0], // original message
 			{
-				Kind:      a2a.KindMessage,
-				MessageID: "msg-002",
-				ContextID: "existing-context-001",
-				TaskID:    "existing-task-001",
-				Role:      a2a.RoleUser,
-				Parts:     []a2a.Part{a2a.NewTextPart("Continue with the active task")},
+				Kind:             a2a.KindMessage,
+				MessageID:        "msg-002",
+				ContextID:        "existing-context-001",
+				TaskID:           "parallel-task-002",
+				Role:             a2a.RoleUser,
+				Parts:            []a2a.Part{a2a.NewTextPart("Parallel follow-up task")},
+				ReferenceTaskIDs: []string{"existing-task-001"},
 			},
 		},
 	}
-	mockStorage.EXPECT().GetTask(gomock.Any(), "existing-task-001", HistoryLengthAll).
-		Return(updatedTask, uint64(2), nil)
+	mockStorage.EXPECT().GetTask(gomock.Any(), "parallel-task-002", HistoryLengthAll).
+		Return(newParallelTask, uint64(1), nil)
 
 	ctx := context.Background()
 
@@ -664,84 +635,23 @@ func TestA2A_ContextContinuation_ActiveTaskFound(t *testing.T) {
 		t.Fatalf("SendMessage failed: %v", err)
 	}
 
-	// Verify the result uses existing task
-	if result.Task.ID != "existing-task-001" {
-		t.Errorf("Expected task ID 'existing-task-001', got '%s'", result.Task.ID)
+	// Verify the result creates new parallel task
+	if result.Task.ID != "parallel-task-002" {
+		t.Errorf("Expected task ID 'parallel-task-002', got '%s'", result.Task.ID)
 	}
 
 	if result.Task.ContextID != "existing-context-001" {
 		t.Errorf("Expected context ID 'existing-context-001', got '%s'", result.Task.ContextID)
 	}
 
-	t.Logf("Successfully continued with existing active task: taskID=%s, contextID=%s", result.Task.ID, result.Task.ContextID)
-}
-
-// TestA2A_ContextContinuation_MultipleActiveTasks tests error when multiple active tasks exist
-func TestA2A_ContextContinuation_MultipleActiveTasks(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	// Create mocks
-	mockAgent := NewMockAgent(ctrl)
-	mockStorage := NewMockStorage(ctrl)
-	mockIDGen := NewMockIDGenerator(ctrl)
-
-	// Create agent service
-	agentService := NewAgentService(mockStorage, mockAgent)
-	agentService.SetIDGenerator(mockIDGen)
-	agentService.DisablePushNotifications = true
-
-	// Test message with contextID but no taskID
-	message := a2a.Message{
-		Kind:      a2a.KindMessage,
-		MessageID: "msg-003",
-		ContextID: "existing-context-001",
-		Role:      a2a.RoleUser,
-		Parts:     []a2a.Part{a2a.NewTextPart("This should fail")},
+	// Verify referenceTaskIDs are preserved
+	if len(result.Task.History) > 0 && len(result.Task.History[0].ReferenceTaskIDs) > 0 {
+		if result.Task.History[0].ReferenceTaskIDs[0] != "existing-task-001" {
+			t.Errorf("Expected referenceTaskID 'existing-task-001', got '%s'", result.Task.History[0].ReferenceTaskIDs[0])
+		}
 	}
 
-	params := a2a.MessageSendParams{
-		Message: message,
-		Configuration: &a2a.MessageSendConfiguration{
-			Blocking: false,
-		},
-	}
-
-	// Create multiple active tasks
-	activeTask1 := &a2a.Task{
-		ID:        "active-task-001",
-		ContextID: "existing-context-001",
-		Status:    a2a.TaskStatus{State: a2a.TaskStateWorking},
-	}
-	activeTask2 := &a2a.Task{
-		ID:        "active-task-002",
-		ContextID: "existing-context-001",
-		Status:    a2a.TaskStatus{State: a2a.TaskStateInputRequired},
-	}
-
-	// Mock expectations
-	mockStorage.EXPECT().ListTasksByContext(gomock.Any(), "existing-context-001", HistoryLengthAll).
-		Return([]*a2a.Task{activeTask1, activeTask2}, []uint64{1, 2}, nil) // Return multiple active tasks
-
-	ctx := context.Background()
-
-	// Call SendMessage - should fail
-	_, err := agentService.SendMessage(ctx, params)
-	if err == nil {
-		t.Fatal("Expected error for multiple active tasks, but got none")
-	}
-
-	// Check if it's the expected JSON-RPC error
-	var jsonrpcErr *a2a.JSONRPCError
-	if !errors.As(err, &jsonrpcErr) {
-		t.Fatalf("Expected JSONRPCError, got %T: %v", err, err)
-	}
-
-	if jsonrpcErr.Code != a2a.ErrorCodeInvalidParams {
-		t.Errorf("Expected error code %d, got %d", a2a.ErrorCodeInvalidParams, jsonrpcErr.Code)
-	}
-
-	t.Logf("Correctly rejected multiple active tasks with error: %v", err)
+	t.Logf("Successfully created parallel follow-up task: taskID=%s, contextID=%s", result.Task.ID, result.Task.ContextID)
 }
 
 // TestA2A_NewConversation tests completely new conversation creation

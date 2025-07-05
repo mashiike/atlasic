@@ -695,158 +695,48 @@ func (s *AgentService) TaskResubscription(ctx context.Context, params a2a.TaskID
 	return s.streamTaskEvents(ctx, task.ContextID, params.ID, false, nil), nil
 }
 
-// findActiveTaskByContextID searches for a non-terminal task within the specified context
-func (s *AgentService) findActiveTaskByContextID(ctx context.Context, contextID string) (*a2a.Task, error) {
-	// Use optimized TaskLister interface if available
-	if lister, ok := s.Storage.(TaskLister); ok {
-		activeTasks, _, err := lister.ListActiveTasksByContext(ctx, contextID)
-		if err != nil {
-			if errors.Is(err, ErrContextNotFound) {
-				return nil, nil // Context doesn't exist = no active tasks
-			}
-			return nil, err
-		}
+// processExistingTask handles adding messages to existing tasks
+func (s *AgentService) processExistingTask(ctx context.Context, params a2a.MessageSendParams) (taskID, contextID string, shouldExecuteAgent bool, err error) {
+	taskID = params.Message.TaskID
 
-		switch len(activeTasks) {
-		case 0:
-			return nil, nil // No active tasks found
-		case 1:
-			return activeTasks[0], nil // Single active task found
-		default:
-			// A2A specification: Multiple active tasks in context is an error
-			return nil, a2a.NewJSONRPCError(a2a.ErrorCodeInvalidParams, map[string]string{
-				"reason":          "Multiple active tasks found in context",
-				"contextId":       contextID,
-				"activeTaskCount": fmt.Sprintf("%d", len(activeTasks)),
-				"suggestion":      "Complete or cancel existing tasks before sending new messages",
-			})
-		}
-	}
-
-	// Fallback: use standard interface with filtering
-	tasks, _, err := s.Storage.ListTasksByContext(ctx, contextID, HistoryLengthAll)
+	// Retrieve existing task
+	existingTask, _, err := s.Storage.GetTask(ctx, taskID, HistoryLengthAll)
 	if err != nil {
-		if errors.Is(err, ErrContextNotFound) {
-			return nil, nil // Context doesn't exist = no active tasks
+		if errors.Is(err, ErrTaskNotFound) {
+			return "", "", false, a2a.NewJSONRPCTaskNotFoundError(taskID)
 		}
-		return nil, err
+		return "", "", false, fmt.Errorf("failed to retrieve existing task %s: %w", taskID, err)
 	}
 
-	var activeTasks []*a2a.Task
-	for _, task := range tasks {
-		if !task.Status.State.IsTerminal() {
-			activeTasks = append(activeTasks, task)
-		}
-	}
+	contextID = existingTask.ContextID
 
-	switch len(activeTasks) {
-	case 0:
-		return nil, nil // No active tasks found
-	case 1:
-		return activeTasks[0], nil // Single active task found
-	default:
-		// A2A specification: Multiple active tasks in context is an error
-		return nil, a2a.NewJSONRPCError(a2a.ErrorCodeInvalidParams, map[string]string{
-			"reason":          "Multiple active tasks found in context",
-			"contextId":       contextID,
-			"activeTaskCount": fmt.Sprintf("%d", len(activeTasks)),
-			"suggestion":      "Complete or cancel existing tasks before sending new messages",
+	// Check if task is in terminal state - A2A Specification (PR #608)
+	// Terminal tasks cannot be restarted, client should create new task
+	if existingTask.Status.State.IsTerminal() {
+		return "", "", false, a2a.NewJSONRPCError(a2a.ErrorCodeInvalidParams, map[string]string{
+			"reason":       "Cannot add messages to terminal task. Create new task with same contextId for follow-up.",
+			"currentState": string(existingTask.Status.State),
+			"suggestion":   "Use referenceTaskIds to reference previous task",
 		})
 	}
+
+	// Add user message to existing task using event sourcing
+	if _, err := s.addMessage(ctx, taskID, params.Message.MessageID, a2a.RoleUser, params.Message.Parts, func(mo *a2a.MessageOptions) {
+		mo.Extensions = params.Message.Extensions
+		mo.Metadata = params.Message.Metadata
+		mo.ReferenceTaskIDs = params.Message.ReferenceTaskIDs
+	}); err != nil {
+		return "", "", false, fmt.Errorf("failed to add message to existing task: %w", err)
+	}
+
+	// Only interrupted tasks (input-required) can restart agent execution
+	shouldExecuteAgent = existingTask.Status.State.IsInterrupted()
+
+	return taskID, contextID, shouldExecuteAgent, nil
 }
 
-// processMessage handles common message processing logic for both SendMessage and SendStreamingMessage
-func (s *AgentService) processMessage(ctx context.Context, params a2a.MessageSendParams) (taskID, contextID string, shouldExecuteAgent bool, err error) {
-	// Get IDGenerator (lazy initialization)
-	idGen := s.getIDGenerator()
-	if params.Message.Role != "" && params.Message.Role != a2a.RoleUser {
-		return "", "", false, a2a.NewJSONRPCError(a2a.ErrorCodeInvalidParams, map[string]string{
-			"reason": "Message role must be 'user'",
-			"role":   params.Message.Role.String(),
-		})
-	}
-	// Ensure message has proper ID if not set
-	if params.Message.MessageID == "" {
-		params.Message.MessageID = idGen.GenerateMessageID()
-	}
-	// Check if this is a continuation of existing task
-	if params.Message.TaskID != "" {
-		// Continue existing task
-		taskID = params.Message.TaskID
-
-		// Retrieve existing task
-		existingTask, _, err := s.Storage.GetTask(ctx, taskID, HistoryLengthAll)
-		if err != nil {
-			// Check if this is a "not found" error
-			if errors.Is(err, ErrTaskNotFound) {
-				return "", "", false, a2a.NewJSONRPCTaskNotFoundError(taskID)
-			}
-			return "", "", false, fmt.Errorf("failed to retrieve existing task %s: %w", taskID, err)
-		}
-
-		contextID = existingTask.ContextID
-
-		// Check if task is in terminal state - A2A Specification (PR #608)
-		// Terminal tasks cannot be restarted, client should create new task
-		if existingTask.Status.State.IsTerminal() {
-			return "", "", false, a2a.NewJSONRPCError(a2a.ErrorCodeInvalidParams, map[string]string{
-				"reason":       "Cannot add messages to terminal task. Create new task with same contextId for follow-up.",
-				"currentState": string(existingTask.Status.State),
-				"suggestion":   "Use referenceTaskIds to reference previous task",
-			})
-		}
-		// Add user message to existing task using event sourcing
-		if _, err := s.addMessage(ctx, taskID, params.Message.MessageID, a2a.RoleUser, params.Message.Parts, func(mo *a2a.MessageOptions) {
-			mo.Extensions = params.Message.Extensions
-			mo.Metadata = params.Message.Metadata
-			mo.ReferenceTaskIDs = params.Message.ReferenceTaskIDs
-		}); err != nil {
-			return "", "", false, fmt.Errorf("failed to add message to existing task: %w", err)
-		}
-
-		// Only interrupted tasks (input-required) can restart agent execution
-		shouldExecuteAgent = existingTask.Status.State.IsInterrupted()
-
-		return taskID, contextID, shouldExecuteAgent, nil
-		// Note: Do not change task status when adding message to existing task
-		// The original task status is preserved
-	}
-	// Check if contextID should be inherited or generated
-	if params.Message.ContextID != "" {
-		// Check if there's an active task in the specified context
-		activeTask, err := s.findActiveTaskByContextID(ctx, params.Message.ContextID)
-		if err != nil {
-			return "", "", false, err
-		}
-
-		if activeTask != nil {
-			// Found active task - add message to existing task
-			taskID = activeTask.ID
-			contextID = activeTask.ContextID
-
-			// Add user message to existing task using event sourcing
-			if _, err := s.addMessage(ctx, taskID, params.Message.MessageID, a2a.RoleUser, params.Message.Parts, func(mo *a2a.MessageOptions) {
-				mo.Extensions = params.Message.Extensions
-				mo.Metadata = params.Message.Metadata
-				mo.ReferenceTaskIDs = params.Message.ReferenceTaskIDs
-			}); err != nil {
-				return "", "", false, fmt.Errorf("failed to add message to active task: %w", err)
-			}
-
-			// Only interrupted tasks can restart agent execution
-			shouldExecuteAgent = activeTask.Status.State.IsInterrupted()
-			return taskID, contextID, shouldExecuteAgent, nil
-		}
-
-		// No active task found - continue with new task creation using provided contextID
-		contextID = params.Message.ContextID
-	} else {
-		// Start completely new conversation
-		contextID = idGen.GenerateContextID()
-	}
-
-	// Create new task - generate ID and prepare message
-	taskID = idGen.GenerateTaskID()
+// createNewTaskFromMessage creates a new task from message parameters
+func (s *AgentService) createNewTaskFromMessage(ctx context.Context, taskID, contextID string, params a2a.MessageSendParams) error {
 	userMessage := a2a.NewMessage(
 		params.Message.MessageID,
 		a2a.RoleUser,
@@ -857,11 +747,48 @@ func (s *AgentService) processMessage(ctx context.Context, params a2a.MessageSen
 	userMessage.Metadata = params.Message.Metadata                 // Copy metadata if any
 
 	// Create new task using TaskUpdater
-	_, err = s.createNewTask(ctx, taskID, contextID, userMessage)
-	if err != nil {
+	_, err := s.createNewTask(ctx, taskID, contextID, userMessage)
+	return err
+}
+
+// processMessage handles common message processing logic for both SendMessage and SendStreamingMessage
+func (s *AgentService) processMessage(ctx context.Context, params a2a.MessageSendParams) (taskID, contextID string, shouldExecuteAgent bool, err error) {
+	// Get IDGenerator (lazy initialization)
+	idGen := s.getIDGenerator()
+
+	// Validate message role
+	if params.Message.Role != "" && params.Message.Role != a2a.RoleUser {
+		return "", "", false, a2a.NewJSONRPCError(a2a.ErrorCodeInvalidParams, map[string]string{
+			"reason": "Message role must be 'user'",
+			"role":   params.Message.Role.String(),
+		})
+	}
+
+	// Ensure message has proper ID if not set
+	if params.Message.MessageID == "" {
+		params.Message.MessageID = idGen.GenerateMessageID()
+	}
+
+	// TaskID explicitly specified → add to existing task
+	if params.Message.TaskID != "" {
+		return s.processExistingTask(ctx, params)
+	}
+
+	// ContextID specified or generate new one → always create new task
+	if params.Message.ContextID != "" {
+		contextID = params.Message.ContextID
+	} else {
+		contextID = idGen.GenerateContextID()
+	}
+
+	// Generate new task ID and create task
+	taskID = idGen.GenerateTaskID()
+
+	if err := s.createNewTaskFromMessage(ctx, taskID, contextID, params); err != nil {
 		return "", "", false, fmt.Errorf("failed to create new task: %w", err)
 	}
 
+	// New tasks always trigger agent execution
 	shouldExecuteAgent = true
 
 	return taskID, contextID, shouldExecuteAgent, nil
