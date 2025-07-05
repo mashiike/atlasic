@@ -49,9 +49,3 @@ type Storage interface {
 	DeleteTaskPushNotificationConfig(ctx context.Context, taskID, configID string) error
 }
 
-// TaskLister provides efficient task listing operations
-// This interface is optional and can be implemented by Storage implementations
-// to provide optimized task filtering capabilities
-type TaskLister interface {
-	ListActiveTasksByContext(ctx context.Context, contextID string) ([]*a2a.Task, []uint64, error)
-}
