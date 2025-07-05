@@ -1128,10 +1128,22 @@ type Server struct {
 	// If nil, no authentication is required.
 	Authenticator transport.Authenticator
 
+	// Extensions specifies the extensions to be used by the server.
+	// Extensions are applied to the transport layer.
+	Extensions []transport.Extension
+
 	// Internal fields
 	agentService *AgentService
 	httpServer   *http.Server
 	mu           sync.Mutex
+}
+
+// Use adds extensions to the server.
+// Extensions are applied to the transport layer for request/response processing.
+func (s *Server) Use(extensions ...transport.Extension) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Extensions = append(s.Extensions, extensions...)
 }
 
 // Run starts the server and blocks until the server shuts down.
@@ -1244,6 +1256,9 @@ func (s *Server) initialize() error {
 		var handlerOptions []transport.HandlerOption
 		if s.Authenticator != nil {
 			handlerOptions = append(handlerOptions, transport.WithAuthenticator(s.Authenticator))
+		}
+		if len(s.Extensions) > 0 {
+			handlerOptions = append(handlerOptions, transport.WithExtensions(s.Extensions...))
 		}
 
 		handler := transport.NewHandler(s.agentService, handlerOptions...)

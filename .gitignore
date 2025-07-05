@@ -28,6 +28,7 @@ go.work.sum
 # Example binaries
 _examples/client/client
 _examples/local/server
+_examples/extensions/extensions
 
 # AI-related files
 CLAUDE.md

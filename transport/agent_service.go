@@ -56,3 +56,10 @@ type AgentService interface {
 	// SupportedOutputModes returns the output modes supported by this agent.
 	SupportedOutputModes(ctx context.Context) ([]string, error)
 }
+
+// ExtensionAware defines the interface for services that support extensions
+type ExtensionAware interface {
+	SetExtensions(extensions []Extension)
+	GetExtensions() []Extension
+	GetExtendedAgentCard(ctx context.Context) (map[string]any, error)
+}

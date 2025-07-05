@@ -29,6 +29,7 @@ type handlerConfig struct {
 	logger               *slog.Logger // Optional logger for debug output
 	authenticator        Authenticator
 	authRequired         bool
+	extensions           []Extension
 }
 
 // WithRPCPath sets the JSON-RPC endpoint path (default: "/")
@@ -67,6 +68,13 @@ func WithLogger(logger *slog.Logger) HandlerOption {
 	}
 }
 
+// WithExtensions adds extensions to the handler
+func WithExtensions(extensions ...Extension) HandlerOption {
+	return func(c *handlerConfig) {
+		c.extensions = append(c.extensions, extensions...)
+	}
+}
+
 // methodDescriptor represents an A2A method with its properties and handler
 type methodDescriptor struct {
 	method    string                                                                                 // Method name (e.g., "message/send")
@@ -80,6 +88,7 @@ type Handler struct {
 	service        AgentService
 	methodRegistry map[string]methodDescriptor
 	config         handlerConfig
+	extensions     map[string]Extension
 }
 
 // NewHandler creates a new A2A JSON-RPC handler with options
@@ -94,10 +103,29 @@ func NewHandler(service AgentService, options ...HandlerOption) *Handler {
 	for _, option := range options {
 		option(&config)
 	}
+	extensions := make(map[string]Extension)
+	for _, ext := range config.extensions {
+		if ext == nil {
+			continue // Skip nil extensions
+		}
+		metadata := ext.GetMetadata()
+		extensions[metadata.URI] = ext
+	}
+	config.extensions = nil // Clear the slice to avoid memory leak
+
+	// Set extensions to AgentService if it supports ExtensionAware
+	if extService, ok := service.(ExtensionAware); ok {
+		extList := make([]Extension, 0, len(extensions))
+		for _, ext := range extensions {
+			extList = append(extList, ext)
+		}
+		extService.SetExtensions(extList)
+	}
 
 	h := &Handler{
-		service: service,
-		config:  config,
+		service:    service,
+		config:     config,
+		extensions: extensions,
 	}
 	h.initMethodRegistry()
 	return h
@@ -119,6 +147,24 @@ func (h *Handler) initMethodRegistry() {
 	// Streaming methods (internal only)
 	h.registerStreamMethod(a2a.MethodSendStreamingMessage, h.handleSendStreamingMessage)
 	h.registerStreamMethod(a2a.MethodTaskResubscription, h.handleTaskResubscribe)
+
+	// Register extensions as methods
+	for uri, ext := range h.extensions {
+		rpcExt, ok := ext.(RPCMethodExtension)
+		if !ok {
+			h.config.logger.Debug("Skipping non-RPC extension", "uri", uri)
+			continue // Skip non-RPC extensions
+		}
+		method := rpcExt.MethodName()
+		baseHandler := rpcExt.MethodHandler()
+		metadata := rpcExt.GetMetadata()
+		handler := &rpcMethodExtensionHandler{
+			handler:    baseHandler,
+			methodName: method,
+			metadata:   metadata,
+		}
+		h.registerJSONMethod(method, handler.ServeRPC)
+	}
 }
 
 // RegisterMethod registers a JSON-RPC method with simplified handler
@@ -145,6 +191,7 @@ func (h *Handler) registerJSONMethod(method string, handler JSONRPCMethodHandler
 			h.writeErrorResponse(w, id, a2a.ErrorCodeInternalError, a2a.ErrorCodeText(a2a.ErrorCodeInternalError), err.Error())
 			return nil
 		}
+
 		h.writeSuccessResponse(w, id, result)
 		return nil
 	}
@@ -240,8 +287,28 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Process Extension activation
+	ctx := r.Context()
+	extensionHeader := r.Header.Get("X-A2A-Extensions")
+	requested := ParseExtensionHeader(extensionHeader)
+
+	// Validate required extensions
+	if err := ValidateRequiredExtensions(h.extensions, requested); err != nil {
+		h.writeErrorResponse(w, req.ID, a2a.ErrorCodeInvalidRequest, err.Error(), nil)
+		return
+	}
+
+	// Resolve active extensions
+	activeExtensions := ResolveActiveExtensions(h.extensions, requested)
+	ctx = WithActiveExtensions(ctx, activeExtensions)
+
+	// Set response header for activated extensions
+	if len(activeExtensions) > 0 {
+		w.Header().Set("X-A2A-Extensions", FormatExtensionHeader(activeExtensions))
+	}
+
 	// Route method using the new registry approach
-	h.routeMethodByRegistry(r.Context(), req, w, r.Header.Get("Accept"))
+	h.routeMethodByRegistry(ctx, req, w, r.Header.Get("Accept"))
 }
 
 // routeMethodByRegistry routes the method using the method registry
@@ -283,6 +350,17 @@ func (h *Handler) routeMethodByRegistry(ctx context.Context, req a2a.JSONRPCRequ
 			h.writeSSEError(w, req.ID, a2a.ErrorCodeInvalidParams, a2a.ErrorCodeText(a2a.ErrorCodeInvalidParams), err.Error())
 		} else {
 			h.writeErrorResponse(w, req.ID, a2a.ErrorCodeInvalidParams, a2a.ErrorCodeText(a2a.ErrorCodeInvalidParams), err.Error())
+		}
+		return
+	}
+
+	// Apply ProfileExtension preprocessing
+	ctx, err = h.applyProfileExtensionPreprocessing(ctx, req.Method, paramsRaw)
+	if err != nil {
+		if isSSEMethod {
+			h.writeSSEError(w, req.ID, a2a.ErrorCodeInternalError, "Profile extension error", err.Error())
+		} else {
+			h.writeErrorResponse(w, req.ID, a2a.ErrorCodeInternalError, "Profile extension error", err.Error())
 		}
 		return
 	}
@@ -423,26 +501,49 @@ func (h *Handler) handleTaskResubscribe(ctx context.Context, params json.RawMess
 func (h *Handler) handleWellKnownAgentCard(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	agentCard, err := h.service.GetAgentCard(ctx)
+	// Try to get extended agent card first, fall back to standard
+	var responseData any
+	var err error
+
+	if extService, ok := h.service.(ExtensionAware); ok {
+		responseData, err = extService.GetExtendedAgentCard(ctx)
+	} else {
+		agentCard, cardErr := h.service.GetAgentCard(ctx)
+		if cardErr != nil {
+			err = cardErr
+		} else {
+			responseData = agentCard
+		}
+	}
+
 	if err != nil {
 		h.config.logger.Error("Failed to get agent card", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	// Replace placeholder URL with actual host if needed (BaseEndpoint)
-	if agentCard.URL == PlaceholderURL {
-		agentCard.URL = h.buildRequestBaseEndpoint(r)
+
+	// Handle URL and authentication for both standard and extended cards
+	var agentCard *a2a.AgentCard
+	if extCard, ok := responseData.(map[string]any); ok {
+		// Extended card - extract base AgentCard for URL handling
+		if baseCard, cardOk := h.extractBaseAgentCard(extCard); cardOk {
+			agentCard = baseCard
+		}
+	} else if card, ok := responseData.(*a2a.AgentCard); ok {
+		// Standard card
+		agentCard = card
 	}
 
-	// Always join the base endpoint with rpcPath to get the final URL
-	if finalURL, err := url.JoinPath(agentCard.URL, h.config.rpcPath); err == nil {
-		agentCard.URL = finalURL
-	}
+	if agentCard != nil {
+		// Apply URL and authentication handling
+		h.applyAgentCardPostProcessing(agentCard, r)
 
-	// Add authentication information if authenticator is configured
-	if h.config.authenticator != nil {
-		agentCard.SecuritySchemes = h.config.authenticator.GetSecuritySchemes()
-		agentCard.Security = h.config.authenticator.GetSecurityRequirements()
+		// Update the response data with modified card
+		if extCard, ok := responseData.(map[string]any); ok {
+			h.updateExtendedCardWithProcessedBase(extCard, agentCard)
+		} else {
+			responseData = agentCard
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -451,7 +552,7 @@ func (h *Handler) handleWellKnownAgentCard(w http.ResponseWriter, r *http.Reques
 			fmt.Sprintf("public, max-age=%d", h.config.agentCardCacheMaxAge))
 	}
 
-	if err := json.NewEncoder(w).Encode(agentCard); err != nil {
+	if err := json.NewEncoder(w).Encode(responseData); err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -474,6 +575,176 @@ func (h *Handler) buildRequestBaseEndpoint(r *http.Request) string {
 	}
 
 	return fmt.Sprintf("%s://%s/", scheme, host)
+}
+
+// extractBaseAgentCard extracts a2a.AgentCard from extended card map
+func (h *Handler) extractBaseAgentCard(extCard map[string]any) (*a2a.AgentCard, bool) {
+	cardData, err := json.Marshal(extCard)
+	if err != nil {
+		return nil, false
+	}
+
+	var agentCard a2a.AgentCard
+	if err := json.Unmarshal(cardData, &agentCard); err != nil {
+		return nil, false
+	}
+
+	return &agentCard, true
+}
+
+// applyAgentCardPostProcessing applies URL and authentication post-processing
+func (h *Handler) applyAgentCardPostProcessing(agentCard *a2a.AgentCard, r *http.Request) {
+	// Ensure ProtocolVersion is always set to the current A2A protocol version
+	agentCard.ProtocolVersion = a2a.ProtocolVersion
+
+	// Replace placeholder URL with actual host if needed
+	if agentCard.URL == PlaceholderURL {
+		agentCard.URL = h.buildRequestBaseEndpoint(r)
+	}
+
+	// Always join the base endpoint with rpcPath to get the final URL
+	if finalURL, err := url.JoinPath(agentCard.URL, h.config.rpcPath); err == nil {
+		agentCard.URL = finalURL
+	}
+
+	// Add authentication information if authenticator is configured
+	if h.config.authenticator != nil {
+		agentCard.SecuritySchemes = h.config.authenticator.GetSecuritySchemes()
+		agentCard.Security = h.config.authenticator.GetSecurityRequirements()
+	}
+}
+
+// updateExtendedCardWithProcessedBase updates extended card with processed base fields
+func (h *Handler) updateExtendedCardWithProcessedBase(extCard map[string]any, processedCard *a2a.AgentCard) {
+	extCard["protocolVersion"] = processedCard.ProtocolVersion
+	extCard["url"] = processedCard.URL
+	if processedCard.SecuritySchemes != nil {
+		extCard["securitySchemes"] = processedCard.SecuritySchemes
+	}
+	if processedCard.Security != nil {
+		extCard["security"] = processedCard.Security
+	}
+}
+
+// applyProfileExtensionPreprocessing applies ProfileExtension preprocessing
+func (h *Handler) applyProfileExtensionPreprocessing(ctx context.Context, method string, params json.RawMessage) (context.Context, error) {
+	activeExtensions := GetActiveExtensions(ctx)
+	for _, ext := range activeExtensions {
+		if profile, ok := ext.(ProfileExtension); ok {
+			// Try method-specific interfaces first
+			processed, err := h.tryMethodSpecificPreprocessing(ctx, method, params, ext)
+			if err != nil {
+				return ctx, fmt.Errorf("profile extension %s method-specific preprocessing failed: %w", ext.GetMetadata().URI, err)
+			}
+			if processed {
+				continue // Skip generic preprocessing if method-specific was handled
+			}
+
+			// Fallback to generic preprocessing
+			ctx, err = profile.PrepareContext(ctx, method, params)
+			if err != nil {
+				return ctx, fmt.Errorf("profile extension %s preprocessing failed: %w", ext.GetMetadata().URI, err)
+			}
+		}
+	}
+	return ctx, nil
+}
+
+// tryMethodSpecificPreprocessing tries method-specific preprocessing interfaces
+func (h *Handler) tryMethodSpecificPreprocessing(ctx context.Context, method string, params json.RawMessage, ext Extension) (bool, error) {
+	switch method {
+	case a2a.MethodSendMessage:
+		if msgExt, ok := ext.(SendMessageProfileExtension); ok {
+			var msgParams a2a.MessageSendParams
+			if err := json.Unmarshal(params, &msgParams); err != nil {
+				return false, err
+			}
+			_, err := msgExt.PrepareSendMessage(ctx, &msgParams)
+			return true, err
+		}
+
+	case a2a.MethodSendStreamingMessage:
+		if streamExt, ok := ext.(SendStreamingMessageProfileExtension); ok {
+			var msgParams a2a.MessageSendParams
+			if err := json.Unmarshal(params, &msgParams); err != nil {
+				return false, err
+			}
+			_, err := streamExt.PrepareSendStreamingMessage(ctx, &msgParams)
+			return true, err
+		}
+
+	case a2a.MethodGetTask:
+		if taskExt, ok := ext.(GetTaskProfileExtension); ok {
+			var taskParams a2a.TaskQueryParams
+			if err := json.Unmarshal(params, &taskParams); err != nil {
+				return false, err
+			}
+			_, err := taskExt.PrepareGetTask(ctx, &taskParams)
+			return true, err
+		}
+
+	case a2a.MethodCancelTask:
+		if taskExt, ok := ext.(CancelTaskProfileExtension); ok {
+			var taskParams a2a.TaskIDParams
+			if err := json.Unmarshal(params, &taskParams); err != nil {
+				return false, err
+			}
+			_, err := taskExt.PrepareCancelTask(ctx, &taskParams)
+			return true, err
+		}
+
+	case a2a.MethodTaskResubscription:
+		if streamExt, ok := ext.(TaskResubscriptionProfileExtension); ok {
+			var taskParams a2a.TaskIDParams
+			if err := json.Unmarshal(params, &taskParams); err != nil {
+				return false, err
+			}
+			_, err := streamExt.PrepareTaskResubscription(ctx, &taskParams)
+			return true, err
+		}
+
+	case a2a.MethodSetTaskPushNotificationConfig:
+		if pushExt, ok := ext.(SetTaskPushNotificationConfigProfileExtension); ok {
+			var pushParams a2a.TaskPushNotificationConfig
+			if err := json.Unmarshal(params, &pushParams); err != nil {
+				return false, err
+			}
+			_, err := pushExt.PrepareSetTaskPushNotificationConfig(ctx, &pushParams)
+			return true, err
+		}
+
+	case a2a.MethodGetTaskPushNotificationConfig:
+		if pushExt, ok := ext.(GetTaskPushNotificationConfigProfileExtension); ok {
+			var pushParams a2a.GetTaskPushNotificationConfigParams
+			if err := json.Unmarshal(params, &pushParams); err != nil {
+				return false, err
+			}
+			_, err := pushExt.PrepareGetTaskPushNotificationConfig(ctx, &pushParams)
+			return true, err
+		}
+
+	case a2a.MethodListTaskPushNotificationConfig:
+		if pushExt, ok := ext.(ListTaskPushNotificationConfigProfileExtension); ok {
+			var taskParams a2a.TaskIDParams
+			if err := json.Unmarshal(params, &taskParams); err != nil {
+				return false, err
+			}
+			_, err := pushExt.PrepareListTaskPushNotificationConfig(ctx, &taskParams)
+			return true, err
+		}
+
+	case a2a.MethodDeleteTaskPushNotificationConfig:
+		if pushExt, ok := ext.(DeleteTaskPushNotificationConfigProfileExtension); ok {
+			var pushParams a2a.DeleteTaskPushNotificationConfigParams
+			if err := json.Unmarshal(params, &pushParams); err != nil {
+				return false, err
+			}
+			_, err := pushExt.PrepareDeleteTaskPushNotificationConfig(ctx, &pushParams)
+			return true, err
+		}
+	}
+
+	return false, nil // No method-specific interface found
 }
 
 // writeSuccessResponse writes a successful JSON-RPC response
