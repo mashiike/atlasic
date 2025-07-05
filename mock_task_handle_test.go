@@ -61,6 +61,34 @@ func (mr *MockTaskHandleMockRecorder) AddMessage(ctx, parts any, optFns ...any) 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddMessage", reflect.TypeOf((*MockTaskHandle)(nil).AddMessage), varargs...)
 }
 
+// DeleteContextFile mocks base method.
+func (m *MockTaskHandle) DeleteContextFile(ctx context.Context, path string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteContextFile", ctx, path)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteContextFile indicates an expected call of DeleteContextFile.
+func (mr *MockTaskHandleMockRecorder) DeleteContextFile(ctx, path any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteContextFile", reflect.TypeOf((*MockTaskHandle)(nil).DeleteContextFile), ctx, path)
+}
+
+// DeleteTaskFile mocks base method.
+func (m *MockTaskHandle) DeleteTaskFile(ctx context.Context, path string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteTaskFile", ctx, path)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteTaskFile indicates an expected call of DeleteTaskFile.
+func (mr *MockTaskHandleMockRecorder) DeleteTaskFile(ctx, path any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteTaskFile", reflect.TypeOf((*MockTaskHandle)(nil).DeleteTaskFile), ctx, path)
+}
+
 // GetAcceptedOutputModes mocks base method.
 func (m *MockTaskHandle) GetAcceptedOutputModes() []string {
 	m.ctrl.T.Helper()
@@ -73,6 +101,21 @@ func (m *MockTaskHandle) GetAcceptedOutputModes() []string {
 func (mr *MockTaskHandleMockRecorder) GetAcceptedOutputModes() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAcceptedOutputModes", reflect.TypeOf((*MockTaskHandle)(nil).GetAcceptedOutputModes))
+}
+
+// GetContextFile mocks base method.
+func (m *MockTaskHandle) GetContextFile(ctx context.Context, path string) ([]byte, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetContextFile", ctx, path)
+	ret0, _ := ret[0].([]byte)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetContextFile indicates an expected call of GetContextFile.
+func (mr *MockTaskHandleMockRecorder) GetContextFile(ctx, path any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetContextFile", reflect.TypeOf((*MockTaskHandle)(nil).GetContextFile), ctx, path)
 }
 
 // GetContextID mocks base method.
@@ -118,6 +161,21 @@ func (mr *MockTaskHandleMockRecorder) GetTask(ctx, historyLength any) *gomock.Ca
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTask", reflect.TypeOf((*MockTaskHandle)(nil).GetTask), ctx, historyLength)
 }
 
+// GetTaskFile mocks base method.
+func (m *MockTaskHandle) GetTaskFile(ctx context.Context, path string) ([]byte, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetTaskFile", ctx, path)
+	ret0, _ := ret[0].([]byte)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetTaskFile indicates an expected call of GetTaskFile.
+func (mr *MockTaskHandleMockRecorder) GetTaskFile(ctx, path any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTaskFile", reflect.TypeOf((*MockTaskHandle)(nil).GetTaskFile), ctx, path)
+}
+
 // GetTaskID mocks base method.
 func (m *MockTaskHandle) GetTaskID() string {
 	m.ctrl.T.Helper()
@@ -130,6 +188,64 @@ func (m *MockTaskHandle) GetTaskID() string {
 func (mr *MockTaskHandleMockRecorder) GetTaskID() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTaskID", reflect.TypeOf((*MockTaskHandle)(nil).GetTaskID))
+}
+
+// ListContextFiles mocks base method.
+func (m *MockTaskHandle) ListContextFiles(ctx context.Context, pathPrefix string) ([]string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListContextFiles", ctx, pathPrefix)
+	ret0, _ := ret[0].([]string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListContextFiles indicates an expected call of ListContextFiles.
+func (mr *MockTaskHandleMockRecorder) ListContextFiles(ctx, pathPrefix any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListContextFiles", reflect.TypeOf((*MockTaskHandle)(nil).ListContextFiles), ctx, pathPrefix)
+}
+
+// ListTaskFiles mocks base method.
+func (m *MockTaskHandle) ListTaskFiles(ctx context.Context, pathPrefix string) ([]string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListTaskFiles", ctx, pathPrefix)
+	ret0, _ := ret[0].([]string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListTaskFiles indicates an expected call of ListTaskFiles.
+func (mr *MockTaskHandleMockRecorder) ListTaskFiles(ctx, pathPrefix any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListTaskFiles", reflect.TypeOf((*MockTaskHandle)(nil).ListTaskFiles), ctx, pathPrefix)
+}
+
+// PutContextFile mocks base method.
+func (m *MockTaskHandle) PutContextFile(ctx context.Context, path string, data []byte) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PutContextFile", ctx, path, data)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// PutContextFile indicates an expected call of PutContextFile.
+func (mr *MockTaskHandleMockRecorder) PutContextFile(ctx, path, data any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PutContextFile", reflect.TypeOf((*MockTaskHandle)(nil).PutContextFile), ctx, path, data)
+}
+
+// PutTaskFile mocks base method.
+func (m *MockTaskHandle) PutTaskFile(ctx context.Context, path string, data []byte) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PutTaskFile", ctx, path, data)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// PutTaskFile indicates an expected call of PutTaskFile.
+func (mr *MockTaskHandleMockRecorder) PutTaskFile(ctx, path, data any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PutTaskFile", reflect.TypeOf((*MockTaskHandle)(nil).PutTaskFile), ctx, path, data)
 }
 
 // UpdateStatus mocks base method.

@@ -314,6 +314,168 @@ func (fs *FileSystemStorage) DeleteTaskPushNotificationConfig(ctx context.Contex
 	return nil
 }
 
+// Context virtual filesystem operations
+
+func (fs *FileSystemStorage) PutContextFile(ctx context.Context, contextID, path string, data []byte) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	filePath := fs.getContextFilePath(contextID, path)
+	if err := os.MkdirAll(filepath.Dir(filePath), 0750); err != nil {
+		return fmt.Errorf("failed to create context file directory: %w", err)
+	}
+
+	if err := os.WriteFile(filePath, data, 0600); err != nil {
+		return fmt.Errorf("failed to write context file: %w", err)
+	}
+
+	return nil
+}
+
+func (fs *FileSystemStorage) GetContextFile(ctx context.Context, contextID, path string) ([]byte, error) {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+
+	filePath := fs.getContextFilePath(contextID, path)
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrFileNotFound
+		}
+		return nil, fmt.Errorf("failed to read context file: %w", err)
+	}
+
+	return data, nil
+}
+
+func (fs *FileSystemStorage) ListContextFiles(ctx context.Context, contextID, pathPrefix string) ([]string, error) {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+
+	baseDir := fs.getContextFileDir(contextID)
+	if pathPrefix == "" {
+		pathPrefix = "."
+	}
+	prefixDir := filepath.Join(baseDir, pathPrefix)
+
+	var files []string
+	err := filepath.WalkDir(prefixDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			relPath, err := filepath.Rel(baseDir, path)
+			if err != nil {
+				return err
+			}
+			files = append(files, filepath.ToSlash(relPath))
+		}
+		return nil
+	})
+
+	if err != nil && os.IsNotExist(err) {
+		return []string{}, nil
+	}
+
+	return files, err
+}
+
+func (fs *FileSystemStorage) DeleteContextFile(ctx context.Context, contextID, path string) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	filePath := fs.getContextFilePath(contextID, path)
+	if err := os.Remove(filePath); err != nil {
+		if os.IsNotExist(err) {
+			return ErrFileNotFound
+		}
+		return fmt.Errorf("failed to delete context file: %w", err)
+	}
+
+	return nil
+}
+
+// Task virtual filesystem operations
+
+func (fs *FileSystemStorage) PutTaskFile(ctx context.Context, taskID, path string, data []byte) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	filePath := fs.getTaskFilePath(taskID, path)
+	if err := os.MkdirAll(filepath.Dir(filePath), 0750); err != nil {
+		return fmt.Errorf("failed to create task file directory: %w", err)
+	}
+
+	if err := os.WriteFile(filePath, data, 0600); err != nil {
+		return fmt.Errorf("failed to write task file: %w", err)
+	}
+
+	return nil
+}
+
+func (fs *FileSystemStorage) GetTaskFile(ctx context.Context, taskID, path string) ([]byte, error) {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+
+	filePath := fs.getTaskFilePath(taskID, path)
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrFileNotFound
+		}
+		return nil, fmt.Errorf("failed to read task file: %w", err)
+	}
+
+	return data, nil
+}
+
+func (fs *FileSystemStorage) ListTaskFiles(ctx context.Context, taskID, pathPrefix string) ([]string, error) {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+
+	baseDir := fs.getTaskFileDir(taskID)
+	if pathPrefix == "" {
+		pathPrefix = "."
+	}
+	prefixDir := filepath.Join(baseDir, pathPrefix)
+
+	var files []string
+	err := filepath.WalkDir(prefixDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			relPath, err := filepath.Rel(baseDir, path)
+			if err != nil {
+				return err
+			}
+			files = append(files, filepath.ToSlash(relPath))
+		}
+		return nil
+	})
+
+	if err != nil && os.IsNotExist(err) {
+		return []string{}, nil
+	}
+
+	return files, err
+}
+
+func (fs *FileSystemStorage) DeleteTaskFile(ctx context.Context, taskID, path string) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	filePath := fs.getTaskFilePath(taskID, path)
+	if err := os.Remove(filePath); err != nil {
+		if os.IsNotExist(err) {
+			return ErrFileNotFound
+		}
+		return fmt.Errorf("failed to delete task file: %w", err)
+	}
+
+	return nil
+}
+
 // Helper methods
 
 func (fs *FileSystemStorage) getTaskPath(taskID string) string {
@@ -374,4 +536,20 @@ func (fs *FileSystemStorage) getTaskPushNotificationConfigWithoutLock(taskID, co
 	}
 
 	return config, nil
+}
+
+func (fs *FileSystemStorage) getContextFileDir(contextID string) string {
+	return filepath.Join(fs.basePath, "fs", "context", contextID)
+}
+
+func (fs *FileSystemStorage) getContextFilePath(contextID, path string) string {
+	return filepath.Join(fs.getContextFileDir(contextID), path)
+}
+
+func (fs *FileSystemStorage) getTaskFileDir(taskID string) string {
+	return filepath.Join(fs.basePath, "fs", "task", taskID)
+}
+
+func (fs *FileSystemStorage) getTaskFilePath(taskID, path string) string {
+	return filepath.Join(fs.getTaskFileDir(taskID), path)
 }

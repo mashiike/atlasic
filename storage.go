@@ -25,6 +25,8 @@ var (
 	ErrContextNotFound = errors.New("context not found")
 	// ErrPushNotificationConfigNotFound is returned when push notification config does not exist
 	ErrPushNotificationConfigNotFound = errors.New("push notification config not found")
+	// ErrFileNotFound is returned when a requested file does not exist
+	ErrFileNotFound = errors.New("file not found")
 )
 
 // Storage provides task persistence and event stream operations (CQRS-based)
@@ -32,6 +34,7 @@ var (
 //   - ErrTaskNotFound: when a requested task does not exist
 //   - ErrContextNotFound: when a requested context does not exist
 //   - ErrPushNotificationConfigNotFound: when push notification config does not exist
+//   - ErrFileNotFound: when a requested file does not exist
 type Storage interface {
 	// Task operations (Query side)
 	GetTask(ctx context.Context, taskID string, historyLength int) (*a2a.Task, uint64, error)
@@ -47,5 +50,17 @@ type Storage interface {
 	GetTaskPushNotificationConfig(ctx context.Context, taskID, configID string) (a2a.TaskPushNotificationConfig, error)
 	ListTaskPushNotificationConfig(ctx context.Context, taskID string) ([]a2a.TaskPushNotificationConfig, error)
 	DeleteTaskPushNotificationConfig(ctx context.Context, taskID, configID string) error
+
+	// Context virtual filesystem operations - enables context-scoped file sharing
+	PutContextFile(ctx context.Context, contextID, path string, data []byte) error
+	GetContextFile(ctx context.Context, contextID, path string) ([]byte, error)
+	ListContextFiles(ctx context.Context, contextID, pathPrefix string) ([]string, error)
+	DeleteContextFile(ctx context.Context, contextID, path string) error
+
+	// Task virtual filesystem operations - enables task-scoped file operations
+	PutTaskFile(ctx context.Context, taskID, path string, data []byte) error
+	GetTaskFile(ctx context.Context, taskID, path string) ([]byte, error)
+	ListTaskFiles(ctx context.Context, taskID, pathPrefix string) ([]string, error)
+	DeleteTaskFile(ctx context.Context, taskID, path string) error
 }
 

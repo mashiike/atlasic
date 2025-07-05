@@ -204,3 +204,68 @@ func (mr *MockAgentServiceMockRecorder) TaskResubscription(ctx, params any) *gom
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TaskResubscription", reflect.TypeOf((*MockAgentService)(nil).TaskResubscription), ctx, params)
 }
+
+// MockExtensionAware is a mock of ExtensionAware interface.
+type MockExtensionAware struct {
+	ctrl     *gomock.Controller
+	recorder *MockExtensionAwareMockRecorder
+	isgomock struct{}
+}
+
+// MockExtensionAwareMockRecorder is the mock recorder for MockExtensionAware.
+type MockExtensionAwareMockRecorder struct {
+	mock *MockExtensionAware
+}
+
+// NewMockExtensionAware creates a new mock instance.
+func NewMockExtensionAware(ctrl *gomock.Controller) *MockExtensionAware {
+	mock := &MockExtensionAware{ctrl: ctrl}
+	mock.recorder = &MockExtensionAwareMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockExtensionAware) EXPECT() *MockExtensionAwareMockRecorder {
+	return m.recorder
+}
+
+// GetExtendedAgentCard mocks base method.
+func (m *MockExtensionAware) GetExtendedAgentCard(ctx context.Context) (map[string]any, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetExtendedAgentCard", ctx)
+	ret0, _ := ret[0].(map[string]any)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetExtendedAgentCard indicates an expected call of GetExtendedAgentCard.
+func (mr *MockExtensionAwareMockRecorder) GetExtendedAgentCard(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetExtendedAgentCard", reflect.TypeOf((*MockExtensionAware)(nil).GetExtendedAgentCard), ctx)
+}
+
+// GetExtensions mocks base method.
+func (m *MockExtensionAware) GetExtensions() []Extension {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetExtensions")
+	ret0, _ := ret[0].([]Extension)
+	return ret0
+}
+
+// GetExtensions indicates an expected call of GetExtensions.
+func (mr *MockExtensionAwareMockRecorder) GetExtensions() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetExtensions", reflect.TypeOf((*MockExtensionAware)(nil).GetExtensions))
+}
+
+// SetExtensions mocks base method.
+func (m *MockExtensionAware) SetExtensions(extensions []Extension) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetExtensions", extensions)
+}
+
+// SetExtensions indicates an expected call of SetExtensions.
+func (mr *MockExtensionAwareMockRecorder) SetExtensions(extensions any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetExtensions", reflect.TypeOf((*MockExtensionAware)(nil).SetExtensions), extensions)
+}

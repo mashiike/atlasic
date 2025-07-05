@@ -21,11 +21,17 @@ type TaskHandle interface {
 	UpdateStatus(ctx context.Context, state a2a.TaskState, parts []a2a.Part, optFns ...func(*a2a.MessageOptions)) (a2a.TaskStatus, error)
 	UpsertArtifact(ctx context.Context, artifact a2a.Artifact) error
 
-	// TODO: Internal conversation functions for Supervisor implementation
-	// These will be used for Supervisor Reasoning/Action and Specialist Agent coordination
-	// AddConversation(ctx context.Context, conversation a2a.Message) error
-	// CompactConversations(ctx context.Context, keepRecent int) error
-	// GetConversationsSince(ctx context.Context, timestamp int64) ([]a2a.Message, error)
+	// Context virtual filesystem operations - enables context-scoped file sharing
+	PutContextFile(ctx context.Context, path string, data []byte) error
+	GetContextFile(ctx context.Context, path string) ([]byte, error)
+	ListContextFiles(ctx context.Context, pathPrefix string) ([]string, error)
+	DeleteContextFile(ctx context.Context, path string) error
+
+	// Task virtual filesystem operations - enables task-scoped file operations
+	PutTaskFile(ctx context.Context, path string, data []byte) error
+	GetTaskFile(ctx context.Context, path string) ([]byte, error)
+	ListTaskFiles(ctx context.Context, pathPrefix string) ([]string, error)
+	DeleteTaskFile(ctx context.Context, path string) error
 }
 
 // taskHandle is the concrete implementation of TaskHandle interface
@@ -78,6 +84,42 @@ func (h *taskHandle) UpsertArtifact(ctx context.Context, artifact a2a.Artifact) 
 		return fmt.Errorf("failed to upsert artifact: %w", err)
 	}
 	return nil
+}
+
+// Context virtual filesystem operations
+
+func (h *taskHandle) PutContextFile(ctx context.Context, path string, data []byte) error {
+	return h.svc.Storage.PutContextFile(ctx, h.contextID, path, data)
+}
+
+func (h *taskHandle) GetContextFile(ctx context.Context, path string) ([]byte, error) {
+	return h.svc.Storage.GetContextFile(ctx, h.contextID, path)
+}
+
+func (h *taskHandle) ListContextFiles(ctx context.Context, pathPrefix string) ([]string, error) {
+	return h.svc.Storage.ListContextFiles(ctx, h.contextID, pathPrefix)
+}
+
+func (h *taskHandle) DeleteContextFile(ctx context.Context, path string) error {
+	return h.svc.Storage.DeleteContextFile(ctx, h.contextID, path)
+}
+
+// Task virtual filesystem operations
+
+func (h *taskHandle) PutTaskFile(ctx context.Context, path string, data []byte) error {
+	return h.svc.Storage.PutTaskFile(ctx, h.taskID, path, data)
+}
+
+func (h *taskHandle) GetTaskFile(ctx context.Context, path string) ([]byte, error) {
+	return h.svc.Storage.GetTaskFile(ctx, h.taskID, path)
+}
+
+func (h *taskHandle) ListTaskFiles(ctx context.Context, pathPrefix string) ([]string, error) {
+	return h.svc.Storage.ListTaskFiles(ctx, h.taskID, pathPrefix)
+}
+
+func (h *taskHandle) DeleteTaskFile(ctx context.Context, path string) error {
+	return h.svc.Storage.DeleteTaskFile(ctx, h.taskID, path)
 }
 
 type TaskHandleParams struct {

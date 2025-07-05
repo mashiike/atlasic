@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -344,6 +345,172 @@ func (s *S3Storage) DeleteTaskPushNotificationConfig(ctx context.Context, taskID
 	return nil
 }
 
+// Context virtual filesystem operations
+
+func (s *S3Storage) PutContextFile(ctx context.Context, contextID, path string, data []byte) error {
+	key := s.getContextFileKey(contextID, path)
+
+	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+		Body:   bytes.NewReader(data),
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to put context file: %w", err)
+	}
+
+	return nil
+}
+
+func (s *S3Storage) GetContextFile(ctx context.Context, contextID, path string) ([]byte, error) {
+	key := s.getContextFileKey(contextID, path)
+
+	result, err := s.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+
+	if err != nil {
+		if strings.Contains(err.Error(), "NoSuchKey") {
+			return nil, atlasic.ErrFileNotFound
+		}
+		return nil, fmt.Errorf("failed to get context file: %w", err)
+	}
+
+	defer result.Body.Close()
+	data, err := io.ReadAll(result.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read context file body: %w", err)
+	}
+
+	return data, nil
+}
+
+func (s *S3Storage) ListContextFiles(ctx context.Context, contextID, pathPrefix string) ([]string, error) {
+	prefix := s.getContextFilePrefix(contextID, pathPrefix)
+
+	var files []string
+	paginator := s3.NewListObjectsV2Paginator(s.client, &s3.ListObjectsV2Input{
+		Bucket: aws.String(s.bucket),
+		Prefix: aws.String(prefix),
+	})
+
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list context files: %w", err)
+		}
+
+		for _, obj := range page.Contents {
+			key := *obj.Key
+			if relPath := s.extractContextFileRelPath(contextID, key); relPath != "" {
+				files = append(files, relPath)
+			}
+		}
+	}
+
+	return files, nil
+}
+
+func (s *S3Storage) DeleteContextFile(ctx context.Context, contextID, path string) error {
+	key := s.getContextFileKey(contextID, path)
+
+	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to delete context file: %w", err)
+	}
+
+	return nil
+}
+
+// Task virtual filesystem operations
+
+func (s *S3Storage) PutTaskFile(ctx context.Context, taskID, path string, data []byte) error {
+	key := s.getTaskFileKey(taskID, path)
+
+	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+		Body:   bytes.NewReader(data),
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to put task file: %w", err)
+	}
+
+	return nil
+}
+
+func (s *S3Storage) GetTaskFile(ctx context.Context, taskID, path string) ([]byte, error) {
+	key := s.getTaskFileKey(taskID, path)
+
+	result, err := s.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+
+	if err != nil {
+		if strings.Contains(err.Error(), "NoSuchKey") {
+			return nil, atlasic.ErrFileNotFound
+		}
+		return nil, fmt.Errorf("failed to get task file: %w", err)
+	}
+
+	defer result.Body.Close()
+	data, err := io.ReadAll(result.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read task file body: %w", err)
+	}
+
+	return data, nil
+}
+
+func (s *S3Storage) ListTaskFiles(ctx context.Context, taskID, pathPrefix string) ([]string, error) {
+	prefix := s.getTaskFilePrefix(taskID, pathPrefix)
+
+	var files []string
+	paginator := s3.NewListObjectsV2Paginator(s.client, &s3.ListObjectsV2Input{
+		Bucket: aws.String(s.bucket),
+		Prefix: aws.String(prefix),
+	})
+
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list task files: %w", err)
+		}
+
+		for _, obj := range page.Contents {
+			key := *obj.Key
+			if relPath := s.extractTaskFileRelPath(taskID, key); relPath != "" {
+				files = append(files, relPath)
+			}
+		}
+	}
+
+	return files, nil
+}
+
+func (s *S3Storage) DeleteTaskFile(ctx context.Context, taskID, path string) error {
+	key := s.getTaskFileKey(taskID, path)
+
+	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to delete task file: %w", err)
+	}
+
+	return nil
+}
+
 // Helper methods for S3 key generation
 
 func (s *S3Storage) getTaskKey(taskID string) string {
@@ -412,6 +579,56 @@ func (s *S3Storage) extractConfigIDFromKey(key string) string {
 			filename := parts[i+2]
 			return strings.TrimSuffix(filename, ".json")
 		}
+	}
+	return ""
+}
+
+func (s *S3Storage) getContextFileKey(contextID, path string) string {
+	if s.prefix != "" {
+		return fmt.Sprintf("%s/fs/context/%s/%s", s.prefix, contextID, path)
+	}
+	return fmt.Sprintf("fs/context/%s/%s", contextID, path)
+}
+
+func (s *S3Storage) getContextFilePrefix(contextID, pathPrefix string) string {
+	if pathPrefix == "" {
+		pathPrefix = ""
+	}
+	if s.prefix != "" {
+		return fmt.Sprintf("%s/fs/context/%s/%s", s.prefix, contextID, pathPrefix)
+	}
+	return fmt.Sprintf("fs/context/%s/%s", contextID, pathPrefix)
+}
+
+func (s *S3Storage) extractContextFileRelPath(contextID, key string) string {
+	prefix := s.getContextFilePrefix(contextID, "")
+	if strings.HasPrefix(key, prefix) {
+		return key[len(prefix):]
+	}
+	return ""
+}
+
+func (s *S3Storage) getTaskFileKey(taskID, path string) string {
+	if s.prefix != "" {
+		return fmt.Sprintf("%s/fs/task/%s/%s", s.prefix, taskID, path)
+	}
+	return fmt.Sprintf("fs/task/%s/%s", taskID, path)
+}
+
+func (s *S3Storage) getTaskFilePrefix(taskID, pathPrefix string) string {
+	if pathPrefix == "" {
+		pathPrefix = ""
+	}
+	if s.prefix != "" {
+		return fmt.Sprintf("%s/fs/task/%s/%s", s.prefix, taskID, pathPrefix)
+	}
+	return fmt.Sprintf("fs/task/%s/%s", taskID, pathPrefix)
+}
+
+func (s *S3Storage) extractTaskFileRelPath(taskID, key string) string {
+	prefix := s.getTaskFilePrefix(taskID, "")
+	if strings.HasPrefix(key, prefix) {
+		return key[len(prefix):]
 	}
 	return ""
 }
