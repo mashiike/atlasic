@@ -120,6 +120,7 @@ func (q *SQSJobQueue) Dequeue(ctx context.Context) (*atlasic.Job, error) {
 			TaskID:              jobConfig.TaskID,
 			ContextID:           jobConfig.ContextID,
 			AcceptedOutputModes: jobConfig.AcceptedOutputModes,
+			IncomingMessageID:   jobConfig.IncomingMessageID,
 			ExtendTimeoutFunc:   q.createExtendTimeoutFunc(*message.ReceiptHandle),
 			CompleteFunc:        q.createCompleteFunc(*message.ReceiptHandle),
 			FailFunc:            q.createFailFunc(*message.ReceiptHandle),

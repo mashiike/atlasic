@@ -17,6 +17,7 @@ var (
 type JobConfig struct {
 	TaskID              string
 	ContextID           string
+	IncomingMessageID   string   // ID of the incoming message that triggered this job
 	AcceptedOutputModes []string // Accepted output modes from MessageSendConfiguration
 }
 
@@ -24,6 +25,7 @@ type JobConfig struct {
 type Job struct {
 	TaskID              string
 	ContextID           string
+	IncomingMessageID   string   // ID of the incoming message that triggered this job
 	AcceptedOutputModes []string // Accepted output modes from MessageSendConfiguration
 
 	// Function fields for queue operations
@@ -71,6 +73,7 @@ func (q *InMemoryJobQueue) Enqueue(ctx context.Context, config JobConfig) error 
 		TaskID:              config.TaskID,
 		ContextID:           config.ContextID,
 		AcceptedOutputModes: config.AcceptedOutputModes,
+		IncomingMessageID:   config.IncomingMessageID,
 		// In-memory queue doesn't need actual timeout/completion handling
 		ExtendTimeoutFunc: func(context.Context, time.Duration) error { return nil },
 		CompleteFunc:      func() error { return nil },

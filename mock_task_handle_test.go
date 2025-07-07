@@ -132,6 +132,20 @@ func (mr *MockTaskHandleMockRecorder) GetContextID() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetContextID", reflect.TypeOf((*MockTaskHandle)(nil).GetContextID))
 }
 
+// GetIncomingMessage mocks base method.
+func (m *MockTaskHandle) GetIncomingMessage() a2a.Message {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetIncomingMessage")
+	ret0, _ := ret[0].(a2a.Message)
+	return ret0
+}
+
+// GetIncomingMessage indicates an expected call of GetIncomingMessage.
+func (mr *MockTaskHandleMockRecorder) GetIncomingMessage() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetIncomingMessage", reflect.TypeOf((*MockTaskHandle)(nil).GetIncomingMessage))
+}
+
 // GetInitialStatus mocks base method.
 func (m *MockTaskHandle) GetInitialStatus() a2a.TaskStatus {
 	m.ctrl.T.Helper()

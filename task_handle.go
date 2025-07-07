@@ -14,6 +14,7 @@ type TaskHandle interface {
 	GetTask(ctx context.Context, historyLength int) (*a2a.Task, error)
 	GetInitialStatus() a2a.TaskStatus // Get task status at the time of dequeue/creation
 	GetAcceptedOutputModes() []string // Get accepted output modes for this task
+	GetIncomingMessage() a2a.Message  // Get the incoming message that triggered this task
 
 	// Task state mutations - implementation handles streaming notifications automatically
 	// Role is fixed to RoleAgent for all TaskHandle operations
@@ -42,6 +43,7 @@ type taskHandle struct {
 	svc                 *AgentService
 	initialStatus       a2a.TaskStatus // Status at the time of task handle creation
 	acceptedOutputModes []string       // Accepted output modes for this task
+	incomingMessage     a2a.Message    // The incoming message that triggered this task
 }
 
 func (h *taskHandle) GetContextID() string {
@@ -67,6 +69,10 @@ func (h *taskHandle) GetTask(ctx context.Context, historyLength int) (*a2a.Task,
 		return nil, fmt.Errorf("failed to get task: %w", err)
 	}
 	return task, nil
+}
+
+func (h *taskHandle) GetIncomingMessage() a2a.Message {
+	return h.incomingMessage
 }
 
 func (h *taskHandle) AddMessage(ctx context.Context, parts []a2a.Part, optFns ...func(*a2a.MessageOptions)) (string, error) {
@@ -127,6 +133,7 @@ type TaskHandleParams struct {
 	TaskID              string
 	InitialStatus       a2a.TaskStatus // Status at the time of task handle creation
 	AcceptedOutputModes []string       // Accepted output modes for this task
+	IncomingMessage     a2a.Message    // The incoming message that triggered this task
 }
 
 func (s *AgentService) NewTaskHandle(ctx context.Context, params TaskHandleParams) TaskHandle {
@@ -136,5 +143,6 @@ func (s *AgentService) NewTaskHandle(ctx context.Context, params TaskHandleParam
 		svc:                 s,
 		initialStatus:       params.InitialStatus,
 		acceptedOutputModes: params.AcceptedOutputModes,
+		incomingMessage:     params.IncomingMessage,
 	}
 }

@@ -264,7 +264,7 @@ func (s *AgentService) ProcessJob(ctx context.Context, job *Job) error {
 	}
 
 	// Get task to capture initial status and verify state
-	task, _, err := s.Storage.GetTask(ctx, job.TaskID, 1)
+	task, _, err := s.Storage.GetTask(ctx, job.TaskID, 10)
 	if err != nil {
 		s.Logger.Error("Failed to get task for processing", "error", err, "taskID", job.TaskID)
 		if failErr := job.FailFunc(); failErr != nil {
@@ -281,6 +281,13 @@ func (s *AgentService) ProcessJob(ctx context.Context, job *Job) error {
 
 	// Capture initial status before changing to working
 	initialStatus := task.Status
+	var incomingMessage a2a.Message
+	for _, msg := range task.History {
+		if msg.MessageID == job.IncomingMessageID {
+			incomingMessage = msg
+			break
+		}
+	}
 
 	// Set task to working state before processing
 	if _, err := s.updateStatus(ctx, job.TaskID, a2a.TaskStateWorking, nil); err != nil {
@@ -295,6 +302,7 @@ func (s *AgentService) ProcessJob(ctx context.Context, job *Job) error {
 		TaskID:              job.TaskID,
 		InitialStatus:       initialStatus,
 		AcceptedOutputModes: job.AcceptedOutputModes,
+		IncomingMessage:     incomingMessage,
 	})
 	// Create wrapped handle to track status updates made by the Agent
 	wrappedHandle := wrapStatusTracker(h)
