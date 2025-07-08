@@ -4,16 +4,17 @@ package ollama
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 
 	"github.com/mashiike/atlasic/a2a"
 	"github.com/mashiike/atlasic/model"
-	"gopkg.in/yaml.v3"
 )
 
 func init() {
@@ -29,6 +30,16 @@ func init() {
 }
 
 const DefaultEndpoint = "http://localhost:11434/api/chat"
+
+// generateRandomID generates a random tool call ID when Ollama doesn't provide one
+func generateRandomID() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to timestamp-based ID if random generation fails
+		return fmt.Sprintf("call_%d", os.Getpid())
+	}
+	return fmt.Sprintf("call_%x", b)
+}
 
 type ModelProvider struct {
 	Endpoint string
@@ -91,7 +102,7 @@ func (m *Model) Generate(ctx context.Context, req *model.GenerateRequest) (*mode
 			}
 
 			// Parse schema to parameters
-			var schema map[string]interface{}
+			var schema map[string]any
 			if err := json.Unmarshal(tool.Schema, &schema); err == nil {
 				ollamaTool.Function.Parameters = schema
 			}
@@ -148,26 +159,17 @@ type ToolDef struct {
 }
 
 type ToolDefDetail struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Parameters  map[string]interface{} `json:"parameters"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Parameters  map[string]any `json:"parameters"`
 }
 
 // convertMessage converts a2a.Message to Ollama Message
 func (m *Model) convertMessage(msg a2a.Message) (*Message, error) {
-	var role string
-	switch msg.Role {
-	case a2a.RoleUser:
-		role = "user"
-	case a2a.RoleAgent:
-		role = "assistant"
-	default:
-		return nil, fmt.Errorf("unsupported message role: %s", msg.Role)
-	}
-
-	// Check for tool result parts in the message
+	// Check for tool result parts first - these need special handling for Ollama
 	toolResults := model.GetToolResultParts(msg)
 	if len(toolResults) > 0 {
+		// For Ollama, tool results should be sent as "tool" role messages
 		// Use the first tool result for Ollama (which expects one tool result per message)
 		toolResult := toolResults[0]
 		var content string
@@ -185,12 +187,83 @@ func (m *Model) convertMessage(msg a2a.Message) (*Message, error) {
 		}, nil
 	}
 
-	// Regular message conversion
+	// Handle regular messages (user/assistant)
+	var role string
+	switch msg.Role {
+	case a2a.RoleUser:
+		role = "user"
+	case a2a.RoleAgent:
+		role = "assistant"
+	case "tool": // Handle tool role directly
+		role = "tool"
+	default:
+		return nil, fmt.Errorf("unsupported message role: %s", msg.Role)
+	}
+
+	// Handle ToolUse parts (assistant messages with tool calls)
+	toolUses := model.GetToolUseParts(msg)
+	if len(toolUses) > 0 && role == "assistant" {
+		// Convert tool uses to Ollama tool_calls format
+		var toolCalls []ToolCall
+		var content string
+
+		for _, part := range msg.Parts {
+			if part.Kind == a2a.KindTextPart {
+				content += part.Text
+			}
+		}
+
+		for _, toolUse := range toolUses {
+			// Convert arguments to json.RawMessage
+			argsBytes, err := json.Marshal(toolUse.Arguments)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal tool arguments: %w", err)
+			}
+
+			toolCall := ToolCall{
+				ID:   toolUse.ID,
+				Type: "function",
+				Function: ToolFunction{
+					Name:      toolUse.ToolName,
+					Arguments: json.RawMessage(argsBytes),
+				},
+			}
+			toolCalls = append(toolCalls, toolCall)
+		}
+
+		return &Message{
+			Role:      "assistant",
+			Content:   content,
+			ToolCalls: toolCalls,
+		}, nil
+	}
+
+	// Regular message conversion (text content only)
 	var content string
 	for _, part := range msg.Parts {
 		if part.Kind == a2a.KindTextPart {
 			content += part.Text
 		}
+	}
+
+	// Handle tool role message with metadata
+	if role == "tool" {
+		ollamaMsg := &Message{
+			Role:    "tool",
+			Content: content,
+		}
+
+		// Extract tool call ID and name from metadata if available
+		if msg.Metadata != nil {
+			if toolCallID, ok := msg.Metadata["tool_call_id"].(string); ok {
+				ollamaMsg.ToolCallID = toolCallID
+			}
+			if toolName, ok := msg.Metadata["tool_name"].(string); ok {
+				ollamaMsg.Name = toolName
+			}
+		}
+
+		return ollamaMsg, nil
 	}
 
 	return &Message{
@@ -205,7 +278,7 @@ func (m *Model) callOllama(ctx context.Context, req ChatRequest) (*model.Generat
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
-
+	slog.DebugContext(ctx, "Ollama request", "body", string(reqBody))
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", m.endpoint, bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -231,6 +304,7 @@ func (m *Model) callOllama(ctx context.Context, req ChatRequest) (*model.Generat
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
+	slog.DebugContext(ctx, "Ollama response", "body", string(body))
 
 	var chatResp ChatResponse
 	if err := json.Unmarshal(body, &chatResp); err != nil {
@@ -252,23 +326,44 @@ func (m *Model) convertResponse(resp ChatResponse) (*model.GenerateResponse, err
 
 	// Add content if present
 	if resp.Message.Content != "" {
-		parts = append(parts, a2a.NewTextPart(resp.Message.Content))
+		// Check if content contains a tool call JSON string
+		var toolCall struct {
+			Name      string          `json:"name"`
+			Arguments json.RawMessage `json:"arguments"`
+		}
+		if err := json.Unmarshal([]byte(resp.Message.Content), &toolCall); err == nil && toolCall.Name != "" {
+			// Content is a tool call JSON string
+			var args map[string]any
+			if err := json.Unmarshal(toolCall.Arguments, &args); err != nil {
+				return nil, fmt.Errorf("failed to parse tool arguments from content: %w", err)
+			}
+			// Create tool use part with generated ID and parsed arguments
+			toolUsePart := model.NewToolUsePart(generateRandomID(), toolCall.Name, args)
+			parts = append(parts, toolUsePart)
+			hasToolUse = true
+		} else {
+			// Otherwise, treat it as regular text content
+			parts = append(parts, a2a.NewTextPart(resp.Message.Content))
+		}
 	}
 	// Convert tool calls if present
 	if len(resp.Message.ToolCalls) > 0 {
 		for _, tc := range resp.Message.ToolCalls {
-			var args map[string]interface{}
-
-			// First try JSON parsing
+			// Parse Arguments from json.RawMessage to map[string]interface{}
+			var args map[string]any
 			if err := json.Unmarshal(tc.Function.Arguments, &args); err != nil {
-				// Fallback to YAML parsing (YAML is a superset of JSON and more tolerant)
-				if yamlErr := yaml.Unmarshal(tc.Function.Arguments, &args); yamlErr != nil {
-					return nil, fmt.Errorf("failed to parse tool arguments: %w", yamlErr)
-				}
+				return nil, fmt.Errorf("failed to parse tool arguments: %w", err)
 			}
 
-			// Create tool use part
-			toolUsePart := model.NewToolUsePart(tc.ID, tc.Function.Name, args)
+			// Get tool ID from Ollama response, fallback to random generation
+			// Note: Ollama often doesn't provide IDs in tool calls
+			toolID := tc.ID
+			if toolID == "" {
+				toolID = generateRandomID()
+			}
+
+			// Create tool use part with correct ID and parsed arguments
+			toolUsePart := model.NewToolUsePart(toolID, tc.Function.Name, args)
 			parts = append(parts, toolUsePart)
 			hasToolUse = true
 		}

@@ -63,4 +63,3 @@ type Storage interface {
 	ListTaskFiles(ctx context.Context, taskID, pathPrefix string) ([]string, error)
 	DeleteTaskFile(ctx context.Context, taskID, path string) error
 }
-

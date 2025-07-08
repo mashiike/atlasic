@@ -143,6 +143,7 @@ func (m *Model) Generate(ctx context.Context, req *model.GenerateRequest) (*mode
 			}
 			toolConfig.Tools = append(toolConfig.Tools, bedrockTool)
 		}
+
 		// Set tool choice if provided
 		if req.ToolChoice != nil {
 			// Convert tool choice to Bedrock format
@@ -160,10 +161,10 @@ func (m *Model) Generate(ctx context.Context, req *model.GenerateRequest) (*mode
 					},
 				}
 			}
-
-			input.ToolConfig = &toolConfig
 		}
 
+		// Always set ToolConfig when tools are provided
+		input.ToolConfig = &toolConfig
 	}
 
 	// Set inference configuration
@@ -180,13 +181,17 @@ func (m *Model) Generate(ctx context.Context, req *model.GenerateRequest) (*mode
 		}
 		input.InferenceConfig = &inferenceConfig
 	}
-
+	if bs, err := json.Marshal(input); err == nil {
+		slog.DebugContext(ctx, "Bedrock Converse Input", "input", string(bs))
+	}
 	// Call Bedrock
 	output, err := m.client.Converse(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("bedrock converse failed: %w", err)
 	}
-
+	if bs, err := json.Marshal(output); err == nil {
+		slog.DebugContext(ctx, "Bedrock Converse Output", "output", string(bs))
+	}
 	// Convert response
 	return m.convertResponse(output)
 }

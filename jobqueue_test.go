@@ -243,13 +243,13 @@ func TestJobQueue_ProcessJobHeartbeat(t *testing.T) {
 
 	// Setup agent execution with delay to allow heartbeat
 	mockAgent.EXPECT().Execute(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(ctx context.Context, handle TaskHandle) error {
+		func(ctx context.Context, handle TaskHandle) (*a2a.Message, error) {
 			// Simulate long-running agent execution
 			select {
 			case <-time.After(150 * time.Millisecond): // Longer than heartbeat interval
-				return nil
+				return nil, nil
 			case <-ctx.Done():
-				return ctx.Err()
+				return nil, ctx.Err()
 			}
 		})
 
@@ -326,15 +326,15 @@ func TestJobQueue_ProcessJobCancellation(t *testing.T) {
 
 	// Setup agent execution that should be cancelled
 	mockAgent.EXPECT().Execute(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(ctx context.Context, handle TaskHandle) error {
+		func(ctx context.Context, handle TaskHandle) (*a2a.Message, error) {
 			// Wait for cancellation
 			select {
 			case <-time.After(500 * time.Millisecond):
 				t.Error("Agent execution should have been cancelled")
-				return nil
+				return nil, nil
 			case <-ctx.Done():
 				t.Log("Agent execution cancelled as expected")
-				return ctx.Err()
+				return nil, ctx.Err()
 			}
 		})
 
@@ -395,15 +395,15 @@ func TestJobQueue_ProcessJobHeartbeatFailure(t *testing.T) {
 
 	// Setup agent execution that should be cancelled due to heartbeat failure
 	mockAgent.EXPECT().Execute(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(ctx context.Context, handle TaskHandle) error {
+		func(ctx context.Context, handle TaskHandle) (*a2a.Message, error) {
 			// Wait for cancellation due to heartbeat failure
 			select {
 			case <-time.After(500 * time.Millisecond):
 				t.Error("Agent execution should have been cancelled due to heartbeat failure")
-				return nil
+				return nil, nil
 			case <-ctx.Done():
 				t.Log("Agent execution cancelled due to heartbeat failure as expected")
-				return ctx.Err()
+				return nil, ctx.Err()
 			}
 		})
 

@@ -42,11 +42,12 @@ func (m *MockAgent) EXPECT() *MockAgentMockRecorder {
 }
 
 // Execute mocks base method.
-func (m *MockAgent) Execute(ctx context.Context, handle TaskHandle) error {
+func (m *MockAgent) Execute(ctx context.Context, handle TaskHandle) (*a2a.Message, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Execute", ctx, handle)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret0, _ := ret[0].(*a2a.Message)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // Execute indicates an expected call of Execute.

@@ -78,13 +78,13 @@ func TestA2A_BasicMessageFlow(t *testing.T) {
 	// Mock agent execution - add a response message
 	agentCalled := make(chan struct{})
 	mockAgent.EXPECT().Execute(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(ctx context.Context, handle TaskHandle) error {
+		func(ctx context.Context, handle TaskHandle) (*a2a.Message, error) {
 			defer close(agentCalled)
 			// Agent adds a response message using new interface
 			_, err := handle.AddMessage(ctx, []a2a.Part{
 				{Kind: a2a.KindTextPart, Text: "Hello back! I received your message."},
 			})
-			return err
+			return nil, err
 		}).Times(1)
 
 	// Create AgentService with FileSystemStorage
@@ -188,11 +188,11 @@ func TestA2A_BlockingMessage(t *testing.T) {
 
 	// Agent execution with quick response
 	mockAgent.EXPECT().Execute(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(ctx context.Context, handle TaskHandle) error {
+		func(ctx context.Context, handle TaskHandle) (*a2a.Message, error) {
 			_, err := handle.AddMessage(ctx, []a2a.Part{
 				{Kind: a2a.KindTextPart, Text: "Blocking response completed."},
 			})
-			return err
+			return nil, err
 		}).Times(1)
 
 	agentService := setupTestAgentService(t, mockAgent, mockIDGen)
@@ -255,11 +255,11 @@ func TestA2A_StreamingMessage(t *testing.T) {
 
 	// Agent execution that adds response
 	mockAgent.EXPECT().Execute(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(ctx context.Context, handle TaskHandle) error {
+		func(ctx context.Context, handle TaskHandle) (*a2a.Message, error) {
 			_, err := handle.AddMessage(ctx, []a2a.Part{
 				{Kind: a2a.KindTextPart, Text: "Streaming response"},
 			})
-			return err
+			return nil, err
 		}).Times(1)
 
 	agentService := setupTestAgentService(t, mockAgent, mockIDGen)
@@ -327,7 +327,7 @@ func TestA2A_ErrorHandling(t *testing.T) {
 
 	// Agent execution that fails
 	mockAgent.EXPECT().Execute(gomock.Any(), gomock.Any()).Return(
-		fmt.Errorf("simulated agent error")).Times(1)
+		nil, fmt.Errorf("simulated agent error")).Times(1)
 
 	agentService := setupTestAgentService(t, mockAgent, mockIDGen)
 
@@ -1418,7 +1418,7 @@ func TestA2A_TaskHandleInitialStatus(t *testing.T) {
 	var capturedInitialStatus a2a.TaskStatus
 
 	mockAgent.EXPECT().Execute(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(ctx context.Context, handle TaskHandle) error {
+		func(ctx context.Context, handle TaskHandle) (*a2a.Message, error) {
 			defer close(agentCalled)
 
 			// Capture the initial status
@@ -1426,7 +1426,7 @@ func TestA2A_TaskHandleInitialStatus(t *testing.T) {
 
 			// Add agent response
 			_, err := handle.AddMessage(ctx, []a2a.Part{a2a.NewTextPart("Task handle received initial status correctly")})
-			return err
+			return nil, err
 		}).Times(1)
 
 	// Mock ID generation
@@ -1476,18 +1476,18 @@ func TestA2A_AgentExplicitStatusUpdate(t *testing.T) {
 	agentCalled := make(chan struct{})
 
 	mockAgent.EXPECT().Execute(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(ctx context.Context, handle TaskHandle) error {
+		func(ctx context.Context, handle TaskHandle) (*a2a.Message, error) {
 			defer close(agentCalled)
 
 			// Add agent response message first
 			_, err := handle.AddMessage(ctx, []a2a.Part{a2a.NewTextPart("Task completed with custom message")})
 			if err != nil {
-				return err
+				return nil, err
 			}
 
 			// Set explicit completed status with message
 			_, err = handle.UpdateStatus(ctx, a2a.TaskStateCompleted, []a2a.Part{a2a.NewTextPart("Agent completed successfully with explicit message")})
-			return err
+			return nil, err
 		}).Times(1)
 
 	// Mock ID generation

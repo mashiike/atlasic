@@ -79,6 +79,63 @@ func TestModel_ConvertMessage_Regular(t *testing.T) {
 	}
 }
 
+func TestModel_ConvertMessage_ToolUse(t *testing.T) {
+	m := &Model{
+		modelID:  "llama3.2",
+		endpoint: DefaultEndpoint,
+	}
+
+	// Create an assistant message with tool use parts
+	toolUsePart := model.NewToolUsePart("call_123", "get_weather", map[string]any{
+		"city": "Tokyo",
+	})
+	
+	agentMsg := a2a.NewMessage("test-agent-msg", a2a.RoleAgent, []a2a.Part{
+		a2a.NewTextPart("I'll check the weather for you."),
+		toolUsePart,
+	})
+
+	ollamaMsg, err := m.convertMessage(agentMsg)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	if ollamaMsg.Role != "assistant" {
+		t.Errorf("Expected role 'assistant', got %s", ollamaMsg.Role)
+	}
+
+	if ollamaMsg.Content != "I'll check the weather for you." {
+		t.Errorf("Expected content 'I'll check the weather for you.', got %s", ollamaMsg.Content)
+	}
+
+	if len(ollamaMsg.ToolCalls) != 1 {
+		t.Errorf("Expected 1 tool call, got %d", len(ollamaMsg.ToolCalls))
+	}
+
+	toolCall := ollamaMsg.ToolCalls[0]
+	if toolCall.ID != "call_123" {
+		t.Errorf("Expected tool call ID 'call_123', got %s", toolCall.ID)
+	}
+
+	if toolCall.Type != "function" {
+		t.Errorf("Expected tool call type 'function', got %s", toolCall.Type)
+	}
+
+	if toolCall.Function.Name != "get_weather" {
+		t.Errorf("Expected function name 'get_weather', got %s", toolCall.Function.Name)
+	}
+
+	// Parse and verify arguments
+	var args map[string]any
+	if err := json.Unmarshal(toolCall.Function.Arguments, &args); err != nil {
+		t.Fatalf("Failed to parse tool arguments: %v", err)
+	}
+
+	if city, ok := args["city"].(string); !ok || city != "Tokyo" {
+		t.Errorf("Expected city argument 'Tokyo', got %v", args["city"])
+	}
+}
+
 func TestModel_ConvertMessage_ToolResult(t *testing.T) {
 	m := &Model{
 		modelID:  "llama3.2",
@@ -156,11 +213,7 @@ func TestModel_ConvertResponse_WithToolCalls(t *testing.T) {
 		endpoint: DefaultEndpoint,
 	}
 
-	toolArgs := map[string]interface{}{
-		"city": "Tokyo",
-	}
-	toolArgsJSON, _ := json.Marshal(toolArgs)
-
+	// Use actual Ollama response format with JSON string arguments
 	ollamaResp := ChatResponse{
 		Message: Message{
 			Role: "assistant",
@@ -170,7 +223,7 @@ func TestModel_ConvertResponse_WithToolCalls(t *testing.T) {
 					Type: "function",
 					Function: ToolFunction{
 						Name:      "get_weather",
-						Arguments: toolArgsJSON,
+						Arguments: json.RawMessage(`{"city":"Tokyo"}`), // json.RawMessage format
 					},
 				},
 			},
@@ -207,6 +260,55 @@ func TestModel_ConvertResponse_WithToolCalls(t *testing.T) {
 
 	if city, ok := toolUse.Arguments["city"].(string); !ok || city != "Tokyo" {
 		t.Errorf("Expected city argument 'Tokyo', got %v", toolUse.Arguments["city"])
+	}
+}
+
+func TestModel_ConvertResponse_WithContentToolCall(t *testing.T) {
+	m := &Model{
+		modelID:  "llama3.2",
+		endpoint: DefaultEndpoint,
+	}
+
+	// Test case where tool call is in content field as JSON string
+	toolCallContent := `{"name":"stop","arguments":{"message":"Task completed","state":"completed"}}`
+	
+	ollamaResp := ChatResponse{
+		Message: Message{
+			Role:    "assistant",
+			Content: toolCallContent,
+		},
+	}
+
+	resp, err := m.convertResponse(ollamaResp)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Check that response contains tool use parts
+	if !model.HasToolUseParts(resp.Message) {
+		t.Error("Expected message to contain tool use parts")
+	}
+
+	if resp.StopReason != model.StopReasonToolUse {
+		t.Errorf("Expected stop reason %s, got %s", model.StopReasonToolUse, resp.StopReason)
+	}
+
+	toolUses := model.GetToolUseParts(resp.Message)
+	if len(toolUses) != 1 {
+		t.Errorf("Expected 1 tool use, got %d", len(toolUses))
+	}
+
+	toolUse := toolUses[0]
+	if toolUse.ToolName != "stop" {
+		t.Errorf("Expected tool name 'stop', got %s", toolUse.ToolName)
+	}
+
+	if message, ok := toolUse.Arguments["message"].(string); !ok || message != "Task completed" {
+		t.Errorf("Expected message argument 'Task completed', got %v", toolUse.Arguments["message"])
+	}
+
+	if state, ok := toolUse.Arguments["state"].(string); !ok || state != "completed" {
+		t.Errorf("Expected state argument 'completed', got %v", toolUse.Arguments["state"])
 	}
 }
 

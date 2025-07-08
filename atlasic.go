@@ -36,15 +36,15 @@ type AgentMetadata struct {
 
 type Agent interface {
 	GetMetadata(ctx context.Context) (*AgentMetadata, error)
-	Execute(ctx context.Context, handle TaskHandle) error
+	Execute(ctx context.Context, handle TaskHandle) (*a2a.Message, error)
 }
 
 type agentFunc struct {
 	metadata *AgentMetadata
-	f        func(ctx context.Context, handle TaskHandle) error
+	f        func(ctx context.Context, handle TaskHandle) (*a2a.Message, error)
 }
 
-func NewAgent(metadata *AgentMetadata, f func(ctx context.Context, handle TaskHandle) error) Agent {
+func NewAgent(metadata *AgentMetadata, f func(ctx context.Context, handle TaskHandle) (*a2a.Message, error)) Agent {
 	if metadata == nil {
 		metadata = &AgentMetadata{}
 	}
@@ -64,7 +64,7 @@ func (a *agentFunc) GetMetadata(_ context.Context) (*AgentMetadata, error) {
 	return a.metadata, nil
 }
 
-func (a *agentFunc) Execute(ctx context.Context, handle TaskHandle) error {
+func (a *agentFunc) Execute(ctx context.Context, handle TaskHandle) (*a2a.Message, error) {
 	return a.f(ctx, handle)
 }
 
@@ -320,7 +320,7 @@ func (s *AgentService) ProcessJob(ctx context.Context, job *Job) error {
 	go s.processJobMonitoring(backgroundCtx, &backgroundWg, job, agentCancel)
 
 	// Execute agent with wrapped handle to track status updates
-	agentErr := s.Agent.Execute(agentCtx, wrappedHandle)
+	resultMessage, agentErr := s.Agent.Execute(agentCtx, wrappedHandle)
 
 	// Stop background goroutines
 	backgroundCancel()
@@ -400,8 +400,19 @@ func (s *AgentService) ProcessJob(ctx context.Context, job *Job) error {
 		if !lastStatus.State.IsTerminal() {
 			s.Logger.Debug("Agent did not set terminal status, applying implicit Completed", "agentStatus", lastStatus.State, "taskID", job.TaskID, "contextID", job.ContextID)
 
-			// Apply implicit completed status
-			if _, updateErr := s.updateStatus(ctx, job.TaskID, a2a.TaskStateCompleted, nil); updateErr != nil {
+			// Apply implicit completed status with result message if available
+			var parts []a2a.Part
+			var optFns []func(*a2a.MessageOptions)
+			if resultMessage != nil {
+				parts = resultMessage.Parts
+				optFns = append(optFns, func(mo *a2a.MessageOptions) {
+					mo.Extensions = resultMessage.Extensions
+					mo.Metadata = resultMessage.Metadata
+					mo.ReferenceTaskIDs = resultMessage.ReferenceTaskIDs
+				})
+			}
+
+			if _, updateErr := s.updateStatus(ctx, job.TaskID, a2a.TaskStateCompleted, parts, optFns...); updateErr != nil {
 				s.Logger.Error("Failed to apply implicit completed status", "error", updateErr, "taskID", job.TaskID, "contextID", job.ContextID)
 				if failErr := job.FailFunc(); failErr != nil {
 					s.Logger.Error("Failed to mark job as failed after status update error", "error", failErr, "taskID", job.TaskID)
@@ -410,9 +421,21 @@ func (s *AgentService) ProcessJob(ctx context.Context, job *Job) error {
 			}
 		}
 	} else {
-		// Agent made no explicit status updates - apply implicit Completed
+		// Agent made no explicit status updates - apply implicit Completed with result message
 		s.Logger.Debug("Agent made no explicit status updates, applying implicit Completed", "taskID", job.TaskID, "contextID", job.ContextID)
-		if _, updateErr := s.updateStatus(ctx, job.TaskID, a2a.TaskStateCompleted, nil); updateErr != nil {
+
+		var parts []a2a.Part
+		var optFns []func(*a2a.MessageOptions)
+		if resultMessage != nil {
+			parts = resultMessage.Parts
+			optFns = append(optFns, func(mo *a2a.MessageOptions) {
+				mo.Extensions = resultMessage.Extensions
+				mo.Metadata = resultMessage.Metadata
+				mo.ReferenceTaskIDs = resultMessage.ReferenceTaskIDs
+			})
+		}
+
+		if _, updateErr := s.updateStatus(ctx, job.TaskID, a2a.TaskStateCompleted, parts, optFns...); updateErr != nil {
 			s.Logger.Error("Failed to apply implicit completed status", "error", updateErr, "taskID", job.TaskID, "contextID", job.ContextID)
 			if failErr := job.FailFunc(); failErr != nil {
 				s.Logger.Error("Failed to mark job as failed after status update error", "error", failErr, "taskID", job.TaskID)

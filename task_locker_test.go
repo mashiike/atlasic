@@ -166,7 +166,7 @@ func TestAgentService_ProcessJobWithTaskLocker(t *testing.T) {
 	mockStorage.EXPECT().SaveTask(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 	// Setup agent execution
-	mockAgent.EXPECT().Execute(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+	mockAgent.EXPECT().Execute(gomock.Any(), gomock.Any()).Return(nil, nil).Times(1)
 
 	// Create agent service with TaskLocker
 	agentService := NewAgentService(mockStorage, mockAgent)
@@ -219,7 +219,7 @@ func TestAgentService_ProcessJobWithoutTaskLocker(t *testing.T) {
 	mockStorage.EXPECT().SaveTask(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 	// Setup agent execution
-	mockAgent.EXPECT().Execute(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+	mockAgent.EXPECT().Execute(gomock.Any(), gomock.Any()).Return(nil, nil).Times(1)
 
 	// Create agent service without TaskLocker
 	agentService := NewAgentService(mockStorage, mockAgent)
