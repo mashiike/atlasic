@@ -40,6 +40,9 @@ type LLMAgent struct {
 	// Customizable prompt builders
 	SystemPromptBuilder func(ctx context.Context, handle TaskHandle, agent *LLMAgent) (string, error)
 	MessagesBuilder     func(ctx context.Context, handle TaskHandle, agent *LLMAgent) ([]a2a.Message, []ExecutableTool, error)
+
+	// RequestOptions allows customization of model.GenerateRequest
+	RequestOptions []func(*model.GenerateRequest) `json:"-"`
 }
 
 // GetMetadata implements Agent interface
@@ -369,17 +372,30 @@ func (a *LLMAgent) newGenerateRequest(ctx context.Context, handle TaskHandle) (*
 	}
 
 	// Create request
-	req := &model.GenerateRequest{
-		System:   systemPrompt,
-		Messages: messages,
-		Tools:    modelTools,
-		Options: &model.GenerationOptions{
-			Temperature: model.Ptr(float32(0.7)),
-		},
-		ToolChoice: &model.ToolChoice{
-			Type: model.ToolChoiceRequired,
-		},
+	req := &model.GenerateRequest{}
+
+	// Apply custom request options first
+	for _, opt := range a.RequestOptions {
+		opt(req)
 	}
+
+	// Apply defaults (won't override if already set)
+	if req.Options == nil {
+		req.Options = &model.GenerationOptions{}
+	}
+	if req.Options.Temperature == nil {
+		req.Options.Temperature = model.Ptr(float32(0.7))
+	}
+	if req.ToolChoice == nil {
+		req.ToolChoice = &model.ToolChoice{
+			Type: model.ToolChoiceRequired,
+		}
+	}
+
+	// Protect core fields - always use LLMAgent's values
+	req.System = systemPrompt
+	req.Messages = messages
+	req.Tools = modelTools
 
 	return req, nil
 }
@@ -572,7 +588,7 @@ func defaultSystemPromptBuilder(ctx context.Context, handle TaskHandle, agent *L
 	sb.WriteString("**Do NOT use file tools for exploratory purposes or general investigation.**\n\n")
 
 	sb.WriteString("## ReAct Loop Operation\n")
-	sb.WriteString("1. **Reason**: Analyze the current situation and plan your next action\n")
+	sb.WriteString("1. **Reason**: Think step-by-step internally. Analyze the current situation, consider available options, and plan your next action methodically\n")
 	sb.WriteString("2. **Act**: Execute one tool call to make progress\n")
 	sb.WriteString("3. **Observe**: Review the results and determine next steps\n")
 	sb.WriteString("4. **Repeat**: Continue until task completion\n\n")
