@@ -89,7 +89,7 @@ func TestModel_ConvertMessage_ToolUse(t *testing.T) {
 	toolUsePart := model.NewToolUsePart("call_123", "get_weather", map[string]any{
 		"city": "Tokyo",
 	})
-	
+
 	agentMsg := a2a.NewMessage("test-agent-msg", a2a.RoleAgent, []a2a.Part{
 		a2a.NewTextPart("I'll check the weather for you."),
 		toolUsePart,
@@ -271,7 +271,7 @@ func TestModel_ConvertResponse_WithContentToolCall(t *testing.T) {
 
 	// Test case where tool call is in content field as JSON string
 	toolCallContent := `{"name":"stop","arguments":{"message":"Task completed","state":"completed"}}`
-	
+
 	ollamaResp := ChatResponse{
 		Message: Message{
 			Role:    "assistant",

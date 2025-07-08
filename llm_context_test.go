@@ -202,26 +202,26 @@ func TestGetFromEmptyContext(t *testing.T) {
 
 func TestToolPriorityOrder(t *testing.T) {
 	ctx := context.Background()
-	
+
 	// Create tools with same name to test priority
 	dynamicTool := &mockTool{name: "samename", description: "dynamic"}
-	staticTool := &mockTool{name: "samename", description: "static"} 
+	staticTool := &mockTool{name: "samename", description: "static"}
 	additionalTool := &mockTool{name: "samename", description: "additional"}
-	
+
 	agent := &LLMAgent{
 		Tools: []ExecutableTool{staticTool},
 	}
-	
+
 	// Add dynamic tool to context
 	ctx1 := WithTools(ctx, dynamicTool)
-	
+
 	// Create a simple mock TaskHandle implementation for testing
 	mockHandle := &simpleMockTaskHandle{}
-	
+
 	// Build tools with additional tool
 	allTools := agent.buildAllTools(ctx1, mockHandle, []ExecutableTool{additionalTool})
-	
-	// Find the tool with name "samename" - should be from highest priority source  
+
+	// Find the tool with name "samename" - should be from highest priority source
 	var foundTool ExecutableTool
 	for _, tool := range allTools {
 		if tool.Name() == "samename" {
@@ -229,12 +229,12 @@ func TestToolPriorityOrder(t *testing.T) {
 			break
 		}
 	}
-	
+
 	if foundTool == nil {
 		t.Errorf("Expected to find tool with name 'samename'")
 		return
 	}
-	
+
 	// Expected priority: Builtin > Dynamic > Static > Additional
 	// Since no builtin tools have "samename", dynamic should win
 	if foundTool.Description() != "dynamic" {
@@ -245,7 +245,7 @@ func TestToolPriorityOrder(t *testing.T) {
 // simpleMockTaskHandle is a minimal TaskHandle implementation for testing
 type simpleMockTaskHandle struct{}
 
-func (m *simpleMockTaskHandle) GetTaskID() string { return "test-task" }
+func (m *simpleMockTaskHandle) GetTaskID() string    { return "test-task" }
 func (m *simpleMockTaskHandle) GetContextID() string { return "test-context" }
 func (m *simpleMockTaskHandle) GetTask(ctx context.Context, historyLength int) (*a2a.Task, error) {
 	return &a2a.Task{}, nil

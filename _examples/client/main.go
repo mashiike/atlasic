@@ -51,7 +51,7 @@ func main() {
 	// Step 2: Send a message to create a new task
 	slog.Info("Step 2: Sending message to create new task...")
 	contextID := fmt.Sprintf("example-context-%d", time.Now().Unix())
-	
+
 	sendParams := a2a.MessageSendParams{
 		Message: a2a.Message{
 			Kind:      a2a.KindMessage,
@@ -78,33 +78,33 @@ func main() {
 
 	// Step 3: Wait for task completion and get result
 	slog.Info("Step 3: Waiting for task completion...")
-	
+
 	maxRetries := 10
 	retryDelay := 2 * time.Second
-	
+
 	for i := 0; i < maxRetries; i++ {
 		time.Sleep(retryDelay)
-		
+
 		historyLengthAll := atlasic.HistoryLengthAll
 		getParams := a2a.TaskQueryParams{
 			ID:            taskID,
 			HistoryLength: &historyLengthAll, // Get all message history
 		}
-		
+
 		task, err := client.GetTask(ctx, getParams)
 		if err != nil {
 			slog.Error("Failed to get task", "error", err, "retry", i+1)
 			continue
 		}
-		
+
 		slog.Info("Task status",
 			"state", task.Status.State,
 			"historyCount", len(task.History))
-		
+
 		// Check if task is completed
 		if task.Status.State.IsTerminal() {
 			slog.Info("Task completed!", "finalState", task.Status.State)
-			
+
 			// Show conversation history
 			slog.Info("=== Conversation History ===")
 			for i, msg := range task.History {
@@ -120,7 +120,7 @@ func main() {
 					"messageID", msg.MessageID,
 					"text", fmt.Sprintf("%v", textParts))
 			}
-			
+
 			if task.Status.State == a2a.TaskStateCompleted {
 				slog.Info("✅ Client-Server communication test completed successfully!")
 			} else {
@@ -128,10 +128,10 @@ func main() {
 			}
 			return
 		}
-		
+
 		slog.Info("Task still in progress, waiting...", "currentState", task.Status.State)
 	}
-	
+
 	slog.Error("Task did not complete within timeout")
 	os.Exit(1)
 }

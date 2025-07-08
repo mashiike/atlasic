@@ -35,10 +35,10 @@ func (e *SampleDataOnlyExtension) EnrichAgentCard(builder *transport.AgentCardBu
 		"maxFileSize":        e.maxFileSize,
 		"features":           []string{"multilingual", "file-upload", "premium"},
 	})
-	
+
 	builder.AddExtensionField("serviceLevel", "premium")
 	builder.AddExtensionField("extensionVersion", "1.0.0")
-	
+
 	return nil
 }
 
@@ -62,7 +62,7 @@ func (e *SampleMethodExtension) MethodHandler() transport.JSONRPCMethodHandler {
 		var pingParams struct {
 			Message string `json:"message,omitempty"`
 		}
-		
+
 		if len(params) > 0 {
 			if err := json.Unmarshal(params, &pingParams); err != nil {
 				return nil, &a2a.JSONRPCError{
@@ -72,12 +72,12 @@ func (e *SampleMethodExtension) MethodHandler() transport.JSONRPCMethodHandler {
 				}
 			}
 		}
-		
+
 		message := pingParams.Message
 		if message == "" {
 			message = "default"
 		}
-		
+
 		return map[string]any{
 			"response":  fmt.Sprintf("Pong: %s", message),
 			"timestamp": "2025-07-04T12:00:00Z",
@@ -104,7 +104,7 @@ func (e *SampleProfileExtension) PrepareContext(ctx context.Context, method stri
 	ctx = context.WithValue(ctx, "extensionTimestamp", "2025-07-04T12:00:00Z")
 	ctx = context.WithValue(ctx, "extensionMethod", method)
 	ctx = context.WithValue(ctx, "extensionActive", true)
-	
+
 	return ctx, nil
 }
 
@@ -114,23 +114,23 @@ func (e *SampleProfileExtension) PrepareSendMessage(ctx context.Context, params 
 	ctx = context.WithValue(ctx, "messageExtensionActive", true)
 	ctx = context.WithValue(ctx, "messageType", "send")
 	ctx = context.WithValue(ctx, "messageCount", len(params.Message.Parts))
-	
+
 	return ctx, nil
 }
 
 func main() {
 	fmt.Println("🚀 ATLASIC Extension System Demo")
 	fmt.Println("=================================")
-	
+
 	// Create sample extensions
 	dataOnlyExt := &SampleDataOnlyExtension{
 		supportedLanguages: []string{"en", "ja", "es"},
 		maxFileSize:        2097152, // 2MB
 	}
-	
+
 	methodExt := &SampleMethodExtension{}
 	profileExt := &SampleProfileExtension{}
-	
+
 	// Create agent using the simplified agent function
 	agent := atlasic.NewAgent(
 		&atlasic.AgentMetadata{
@@ -144,11 +144,11 @@ func main() {
 			if err != nil {
 				return fmt.Errorf("failed to get task: %w", err)
 			}
-			
+
 			if len(task.History) == 0 {
 				return fmt.Errorf("no message found in task history")
 			}
-			
+
 			// Get the last user message
 			var lastMessage *a2a.Message
 			for i := len(task.History) - 1; i >= 0; i-- {
@@ -157,7 +157,7 @@ func main() {
 					break
 				}
 			}
-			
+
 			if lastMessage == nil || len(lastMessage.Parts) == 0 {
 				return fmt.Errorf("no user message found")
 			}
@@ -178,7 +178,7 @@ func main() {
 
 	// Add extensions using the Use method
 	server.Use(dataOnlyExt, methodExt, profileExt)
-	
+
 	fmt.Println("🎯 Demo Server Configuration:")
 	fmt.Println("  • DataOnly Extension: Custom capabilities in AgentCard")
 	fmt.Println("  • Method Extension: Custom 'sample/ping' JSON-RPC method")
