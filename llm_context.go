@@ -6,30 +6,33 @@ import "context"
 type llmContextKey string
 
 const (
-	// ContextKeySubAgents stores additional sub-agents for LLMAgent
-	ContextKeySubAgents = llmContextKey("llm_agent_sub_agents")
+	// contextKeySubAgents stores additional sub-agents for LLMAgent (private)
+	contextKeySubAgents = llmContextKey("llm_agent_sub_agents")
 
-	// ContextKeyTools stores additional tools for LLMAgent
-	ContextKeyTools = llmContextKey("llm_agent_tools")
+	// contextKeyTools stores additional tools for LLMAgent (private)
+	contextKeyTools = llmContextKey("llm_agent_tools")
+
+	// contextKeyDelegationMessage stores message for sub-agent delegation (private)
+	contextKeyDelegationMessage = llmContextKey("llm_agent_delegation_message")
 )
 
 // WithSubAgents adds sub-agents to the context for dynamic LLMAgent extension
 func WithSubAgents(ctx context.Context, agents ...Agent) context.Context {
 	existing := GetSubAgentsFromContext(ctx)
 	combined := append(existing, agents...)
-	return context.WithValue(ctx, ContextKeySubAgents, combined)
+	return context.WithValue(ctx, contextKeySubAgents, combined)
 }
 
 // WithTools adds tools to the context for dynamic LLMAgent extension
 func WithTools(ctx context.Context, tools ...ExecutableTool) context.Context {
 	existing := GetToolsFromContext(ctx)
 	combined := append(existing, tools...)
-	return context.WithValue(ctx, ContextKeyTools, combined)
+	return context.WithValue(ctx, contextKeyTools, combined)
 }
 
 // GetSubAgentsFromContext retrieves sub-agents from the context
 func GetSubAgentsFromContext(ctx context.Context) []Agent {
-	if agents, ok := ctx.Value(ContextKeySubAgents).([]Agent); ok {
+	if agents, ok := ctx.Value(contextKeySubAgents).([]Agent); ok {
 		return agents
 	}
 	return nil
@@ -37,10 +40,23 @@ func GetSubAgentsFromContext(ctx context.Context) []Agent {
 
 // GetToolsFromContext retrieves tools from the context
 func GetToolsFromContext(ctx context.Context) []ExecutableTool {
-	if tools, ok := ctx.Value(ContextKeyTools).([]ExecutableTool); ok {
+	if tools, ok := ctx.Value(contextKeyTools).([]ExecutableTool); ok {
 		return tools
 	}
 	return nil
+}
+
+// WithDelegationMessage adds a delegation message to the context for sub-agent communication
+func WithDelegationMessage(ctx context.Context, message string) context.Context {
+	return context.WithValue(ctx, contextKeyDelegationMessage, message)
+}
+
+// GetDelegationMessage retrieves the delegation message from the context
+func GetDelegationMessage(ctx context.Context) (string, bool) {
+	if message, ok := ctx.Value(contextKeyDelegationMessage).(string); ok {
+		return message, true
+	}
+	return "", false
 }
 
 // AppendSubAgent appends a single sub-agent to existing context sub-agents

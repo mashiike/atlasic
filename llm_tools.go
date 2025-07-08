@@ -253,12 +253,12 @@ func (t *DelegateToAgentTool) Schema() json.RawMessage {
 				"type":        "string",
 				"description": "Why you are delegating to this specific agent (e.g., 'User asking about order status', 'Need payment processing expertise')",
 			},
-			"message": map[string]any{
+			"instruction": map[string]any{
 				"type":        "string",
-				"description": "Optional specific message/context to send to the sub-agent",
+				"description": "Specific instruction or context for the sub-agent to focus on. This tells the sub-agent what to prioritize or how to approach the task (e.g., 'Focus on order ID ORD-12345', 'Process payment for premium subscription', 'Check inventory levels for product XYZ')",
 			},
 		},
-		"required": []string{"agent_name", "reason"},
+		"required": []string{"agent_name", "reason", "instruction"},
 	}
 	data, err := json.Marshal(schema)
 	if err != nil {
@@ -276,6 +276,15 @@ func (t *DelegateToAgentTool) Execute(ctx context.Context, args map[string]any) 
 	reason, ok := args["reason"].(string)
 	if !ok {
 		return a2a.Part{}, fmt.Errorf("reason must be a string")
+	}
+
+	// Extract required instruction for sub-agent
+	delegationInstruction, ok := args["instruction"].(string)
+	if !ok {
+		return a2a.Part{}, fmt.Errorf("instruction must be a string")
+	}
+	if delegationInstruction == "" {
+		return a2a.Part{}, fmt.Errorf("instruction cannot be empty")
 	}
 
 	// Find the sub-agent by name
@@ -312,8 +321,11 @@ func (t *DelegateToAgentTool) Execute(ctx context.Context, args map[string]any) 
 		}
 	}
 
-	// Execute the sub-agent
-	resultMessage, err := targetAgent.Execute(ctx, t.handle)
+	// Create context with delegation instruction (now required)
+	subCtx := WithDelegationMessage(ctx, delegationInstruction)
+
+	// Execute the sub-agent with enriched context
+	resultMessage, err := targetAgent.Execute(subCtx, t.handle)
 	if err != nil {
 		return a2a.Part{}, fmt.Errorf("sub-agent execution failed: %w", err)
 	}

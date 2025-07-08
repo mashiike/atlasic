@@ -292,3 +292,45 @@ func (m *simpleMockTaskHandle) ListContextFiles(ctx context.Context, pathPrefix 
 func (m *simpleMockTaskHandle) DeleteContextFile(ctx context.Context, path string) error {
 	return nil
 }
+
+func TestDelegationMessageContext(t *testing.T) {
+	ctx := context.Background()
+
+	// Test empty context
+	if message, exists := GetDelegationMessage(ctx); exists {
+		t.Errorf("Expected no delegation message in empty context, got %s", message)
+	}
+
+	// Test with delegation message
+	testMessage := "Please process this user request"
+	ctx1 := WithDelegationMessage(ctx, testMessage)
+
+	message, exists := GetDelegationMessage(ctx1)
+	if !exists {
+		t.Error("Expected delegation message to exist")
+	}
+	if message != testMessage {
+		t.Errorf("Expected message %s, got %s", testMessage, message)
+	}
+
+	// Test overwriting message
+	newMessage := "Updated delegation message"
+	ctx2 := WithDelegationMessage(ctx1, newMessage)
+
+	message, exists = GetDelegationMessage(ctx2)
+	if !exists {
+		t.Error("Expected delegation message to exist after update")
+	}
+	if message != newMessage {
+		t.Errorf("Expected updated message %s, got %s", newMessage, message)
+	}
+
+	// Test original context unchanged
+	originalMessage, exists := GetDelegationMessage(ctx1)
+	if !exists {
+		t.Error("Expected original context to still have delegation message")
+	}
+	if originalMessage != testMessage {
+		t.Errorf("Expected original message %s, got %s", testMessage, originalMessage)
+	}
+}
