@@ -103,14 +103,22 @@ func (a *LLMAgent) fillDefaults() {
 }
 
 // buildAllTools builds the complete tool set with deduplication
-func (a *LLMAgent) buildAllTools(handle TaskHandle, additionalTools []ExecutableTool) []ExecutableTool {
+// Priority order (first wins in case of name conflicts):
+// 1. Builtin tools (highest priority)
+// 2. Context dynamic tools
+// 3. Agent static tools (LLMAgent specific)
+// 4. Additional tools (lowest priority)
+func (a *LLMAgent) buildAllTools(ctx context.Context, handle TaskHandle, additionalTools []ExecutableTool) []ExecutableTool {
 	var allTools []ExecutableTool
 
-	// Add default builtin tools
+	// Get all sub-agents (static + dynamic from context)
+	allSubAgents := a.GetAllSubAgents(ctx)
+
+	// Add default builtin tools (highest priority)
 	builtinTools := []ExecutableTool{
 		NewUpdateArtifactTool(handle),
 		NewStopTool(handle),
-		NewDelegateToAgentTool(handle, a.SubAgents...),
+		NewDelegateToAgentTool(handle, allSubAgents...),
 		// Only provide read-only file tools to prevent unwanted file manipulation
 		NewTaskFileReadTool(handle),
 		NewTaskFileListTool(handle),
@@ -119,7 +127,22 @@ func (a *LLMAgent) buildAllTools(handle TaskHandle, additionalTools []Executable
 	}
 	allTools = append(allTools, builtinTools...)
 
-	// Add agent's custom tools (with deduplication)
+	// Add dynamic tools from context (with deduplication)
+	dynamicTools := GetToolsFromContext(ctx)
+	for _, dynamicTool := range dynamicTools {
+		duplicate := false
+		for _, existing := range allTools {
+			if existing.Name() == dynamicTool.Name() {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			allTools = append(allTools, dynamicTool)
+		}
+	}
+
+	// Add agent's static tools (LLMAgent specific, with deduplication)
 	for _, agentTool := range a.Tools {
 		duplicate := false
 		for _, existing := range allTools {
@@ -328,7 +351,7 @@ func (a *LLMAgent) newGenerateRequest(ctx context.Context, handle TaskHandle) (*
 	}
 
 	// Build all available tools with deduplication
-	allTools := a.buildAllTools(handle, additionalTools)
+	allTools := a.buildAllTools(ctx, handle, additionalTools)
 
 	// Convert tools to model.Tools
 	var modelTools []model.Tool
@@ -355,7 +378,7 @@ func (a *LLMAgent) newGenerateRequest(ctx context.Context, handle TaskHandle) (*
 // executeToolsAndCollectLogs executes tools, collects logs, and handles stop message
 func (a *LLMAgent) executeToolsAndCollectLogs(ctx context.Context, handle TaskHandle, toolUses []*model.ToolUse, iteration int, logBuffer *strings.Builder) (bool, a2a.Message, *a2a.Message, error) {
 	// Build available tools
-	allTools := a.buildAllTools(handle, nil)
+	allTools := a.buildAllTools(ctx, handle, nil)
 
 	shouldStop := false
 	var results []a2a.Part
