@@ -9,6 +9,7 @@ import (
 
 	"github.com/mashiike/atlasic"
 	"github.com/mashiike/atlasic/a2a"
+	"github.com/mashiike/atlasic/model"
 	_ "github.com/mashiike/atlasic/model/bedrock"
 	_ "github.com/mashiike/atlasic/model/ollama"
 )
@@ -86,9 +87,18 @@ func main() {
 	flag.Parse()
 	modelProvider := "ollama"
 	modelID := "llama3.2"
+	opts := make([]func(*model.GenerateRequest), 0)
 	if useBedrock {
 		modelProvider = "bedrock"
 		modelID = "us.anthropic.claude-3-sonnet-20240229-v1:0"
+		opts = append(opts, func(req *model.GenerateRequest) {
+			req.Extensions = map[string]any{
+				"thinking": map[string]any{
+					"type":          "enabled",
+					"budget_tokens": 10000,
+				},
+			}
+		})
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
@@ -120,7 +130,8 @@ Your main responsibilities:
 - Summarize information received from specialized agents
 
 Always be polite and helpful in your responses.`,
-		Version: "1.0.0",
+		Version:        "1.0.0",
+		RequestOptions: opts,
 	}
 
 	// Set up sub-agents for delegation
