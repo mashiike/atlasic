@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/mashiike/atlasic/a2a"
+	"go.uber.org/mock/gomock"
 )
 
 // mockTool for testing
@@ -216,7 +217,12 @@ func TestToolPriorityOrder(t *testing.T) {
 	ctx1 := WithTools(ctx, dynamicTool)
 
 	// Create a simple mock TaskHandle implementation for testing
-	mockHandle := &simpleMockTaskHandle{}
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockHandle := NewMockTaskHandle(ctrl)
+	mockHandle.EXPECT().GetTaskID().Return("test-task").AnyTimes()
+	mockHandle.EXPECT().GetContextID().Return("test-context").AnyTimes()
 
 	// Build tools with additional tool
 	allTools := agent.buildAllTools(ctx1, mockHandle, []ExecutableTool{additionalTool})
@@ -240,57 +246,6 @@ func TestToolPriorityOrder(t *testing.T) {
 	if foundTool.Description() != "dynamic" {
 		t.Errorf("Expected dynamic tool to have priority, got tool with description: %s", foundTool.Description())
 	}
-}
-
-// simpleMockTaskHandle is a minimal TaskHandle implementation for testing
-type simpleMockTaskHandle struct{}
-
-func (m *simpleMockTaskHandle) GetTaskID() string    { return "test-task" }
-func (m *simpleMockTaskHandle) GetContextID() string { return "test-context" }
-func (m *simpleMockTaskHandle) GetTask(ctx context.Context, historyLength int) (*a2a.Task, error) {
-	return &a2a.Task{}, nil
-}
-func (m *simpleMockTaskHandle) GetInitialStatus() a2a.TaskStatus {
-	return a2a.TaskStatus{}
-}
-func (m *simpleMockTaskHandle) GetAcceptedOutputModes() []string {
-	return []string{"text/plain"}
-}
-func (m *simpleMockTaskHandle) GetIncomingMessage() a2a.Message {
-	return a2a.Message{}
-}
-func (m *simpleMockTaskHandle) UpdateStatus(ctx context.Context, state a2a.TaskState, parts []a2a.Part, optFns ...func(*a2a.MessageOptions)) (a2a.TaskStatus, error) {
-	return a2a.TaskStatus{}, nil
-}
-func (m *simpleMockTaskHandle) AddMessage(ctx context.Context, parts []a2a.Part, optFns ...func(*a2a.MessageOptions)) (string, error) {
-	return "test-message-id", nil
-}
-func (m *simpleMockTaskHandle) UpsertArtifact(ctx context.Context, artifact a2a.Artifact) error {
-	return nil
-}
-func (m *simpleMockTaskHandle) PutTaskFile(ctx context.Context, path string, data []byte) error {
-	return nil
-}
-func (m *simpleMockTaskHandle) GetTaskFile(ctx context.Context, path string) ([]byte, error) {
-	return nil, nil
-}
-func (m *simpleMockTaskHandle) ListTaskFiles(ctx context.Context, pathPrefix string) ([]string, error) {
-	return nil, nil
-}
-func (m *simpleMockTaskHandle) DeleteTaskFile(ctx context.Context, path string) error {
-	return nil
-}
-func (m *simpleMockTaskHandle) PutContextFile(ctx context.Context, path string, data []byte) error {
-	return nil
-}
-func (m *simpleMockTaskHandle) GetContextFile(ctx context.Context, path string) ([]byte, error) {
-	return nil, nil
-}
-func (m *simpleMockTaskHandle) ListContextFiles(ctx context.Context, pathPrefix string) ([]string, error) {
-	return nil, nil
-}
-func (m *simpleMockTaskHandle) DeleteContextFile(ctx context.Context, path string) error {
-	return nil
 }
 
 func TestDelegationMessageContext(t *testing.T) {
