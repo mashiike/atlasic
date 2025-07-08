@@ -3,12 +3,17 @@ package atlasic
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/mashiike/atlasic/a2a"
 	"github.com/mashiike/atlasic/model"
 )
+
+// ErrInterrupted is returned when a sub-agent execution is interrupted
+// due to states that require external intervention (input-required, auth-required, etc.)
+var ErrInterrupted = errors.New("execution interrupted")
 
 // ExecutableTool represents a tool that can be executed by LLMAgent
 type ExecutableTool interface {
@@ -328,6 +333,13 @@ func (t *DelegateToAgentTool) Execute(ctx context.Context, args map[string]any) 
 	resultMessage, err := targetAgent.Execute(subCtx, t.handle)
 	if err != nil {
 		return a2a.Part{}, fmt.Errorf("sub-agent execution failed: %w", err)
+	}
+
+	// Check if sub-agent set task to an interrupted state (input-required, auth-required, etc.)
+	task, taskErr := t.handle.GetTask(ctx, 1) // Only need current status
+	if taskErr == nil && task.Status.State.IsInterrupted() {
+		return a2a.Part{}, fmt.Errorf("sub-agent '%s' interrupted (state: %s): %w",
+			agentName, task.Status.State, ErrInterrupted)
 	}
 
 	// Use result message if available, otherwise provide default delegation message

@@ -3,6 +3,7 @@ package atlasic
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -189,6 +190,13 @@ func (a *LLMAgent) Execute(ctx context.Context, handle TaskHandle) (*a2a.Message
 	// Initialize log buffer
 	var logBuffer strings.Builder
 
+	// Ensure logs are flushed regardless of exit path
+	defer func() {
+		if err := a.flushLogBuffer(ctx, handle, &logBuffer); err != nil {
+			a.Logger.Warn("Failed to write ReAct logs", "error", err)
+		}
+	}()
+
 	// Create initial request
 	req, err := a.newGenerateRequest(ctx, handle)
 	if err != nil {
@@ -246,6 +254,12 @@ func (a *LLMAgent) Execute(ctx context.Context, handle TaskHandle) (*a2a.Message
 		if len(toolUses) > 0 {
 			shouldStop, userMessage, stopMessage, err := a.executeToolsAndCollectLogs(ctx, handle, toolUses, iteration+1, &logBuffer)
 			if err != nil {
+				// Check if error is ErrInterrupted from sub-agent
+				if errors.Is(err, ErrInterrupted) {
+					a.Logger.Info("ReAct loop ended due to sub-agent interruption", "iteration", iteration+1, "error", err)
+					return nil, err
+				}
+
 				// If tool execution fails, add error to context and continue
 				a.Logger.Warn("Tool execution failed, continuing with error feedback", "error", err, "iteration", iteration+1)
 
@@ -280,11 +294,6 @@ func (a *LLMAgent) Execute(ctx context.Context, handle TaskHandle) (*a2a.Message
 		}
 
 		// Step 3: Observation - Task state is updated through TaskHandle
-	}
-
-	// Write buffered logs to task file
-	if err := a.flushLogBuffer(ctx, handle, &logBuffer); err != nil {
-		a.Logger.Warn("Failed to write ReAct logs", "error", err)
 	}
 
 	// Handle different exit conditions
