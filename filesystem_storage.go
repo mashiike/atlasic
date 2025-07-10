@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -316,36 +317,21 @@ func (fs *FileSystemStorage) DeleteTaskPushNotificationConfig(ctx context.Contex
 
 // Context virtual filesystem operations
 
-func (fs *FileSystemStorage) PutContextFile(ctx context.Context, contextID, path string, data []byte) error {
+func (fs *FileSystemStorage) OpenContextFile(ctx context.Context, contextID, path string, flag int, perm os.FileMode) (fs.File, error) {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
 	filePath := fs.getContextFilePath(contextID, path)
 	if err := os.MkdirAll(filepath.Dir(filePath), 0750); err != nil {
-		return fmt.Errorf("failed to create context file directory: %w", err)
+		return nil, fmt.Errorf("failed to create context file directory: %w", err)
 	}
 
-	if err := os.WriteFile(filePath, data, 0600); err != nil {
-		return fmt.Errorf("failed to write context file: %w", err)
-	}
-
-	return nil
-}
-
-func (fs *FileSystemStorage) GetContextFile(ctx context.Context, contextID, path string) ([]byte, error) {
-	fs.mu.RLock()
-	defer fs.mu.RUnlock()
-
-	filePath := fs.getContextFilePath(contextID, path)
-	data, err := os.ReadFile(filePath)
+	file, err := os.OpenFile(filePath, flag, perm)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, ErrFileNotFound
-		}
-		return nil, fmt.Errorf("failed to read context file: %w", err)
+		return nil, fmt.Errorf("failed to open context file: %w", err)
 	}
 
-	return data, nil
+	return file, nil
 }
 
 func (fs *FileSystemStorage) ListContextFiles(ctx context.Context, contextID, pathPrefix string) ([]string, error) {
@@ -397,36 +383,21 @@ func (fs *FileSystemStorage) DeleteContextFile(ctx context.Context, contextID, p
 
 // Task virtual filesystem operations
 
-func (fs *FileSystemStorage) PutTaskFile(ctx context.Context, taskID, path string, data []byte) error {
+func (fs *FileSystemStorage) OpenTaskFile(ctx context.Context, taskID, path string, flag int, perm os.FileMode) (fs.File, error) {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
 	filePath := fs.getTaskFilePath(taskID, path)
 	if err := os.MkdirAll(filepath.Dir(filePath), 0750); err != nil {
-		return fmt.Errorf("failed to create task file directory: %w", err)
+		return nil, fmt.Errorf("failed to create task file directory: %w", err)
 	}
 
-	if err := os.WriteFile(filePath, data, 0600); err != nil {
-		return fmt.Errorf("failed to write task file: %w", err)
-	}
-
-	return nil
-}
-
-func (fs *FileSystemStorage) GetTaskFile(ctx context.Context, taskID, path string) ([]byte, error) {
-	fs.mu.RLock()
-	defer fs.mu.RUnlock()
-
-	filePath := fs.getTaskFilePath(taskID, path)
-	data, err := os.ReadFile(filePath)
+	file, err := os.OpenFile(filePath, flag, perm)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, ErrFileNotFound
-		}
-		return nil, fmt.Errorf("failed to read task file: %w", err)
+		return nil, fmt.Errorf("failed to open task file: %w", err)
 	}
 
-	return data, nil
+	return file, nil
 }
 
 func (fs *FileSystemStorage) ListTaskFiles(ctx context.Context, taskID, pathPrefix string) ([]string, error) {

@@ -11,6 +11,8 @@ package atlasic
 
 import (
 	context "context"
+	fs "io/fs"
+	os "os"
 	reflect "reflect"
 
 	a2a "github.com/mashiike/atlasic/a2a"
@@ -54,6 +56,34 @@ func (m *MockStorage) Append(ctx context.Context, contextID, taskID string, expe
 func (mr *MockStorageMockRecorder) Append(ctx, contextID, taskID, expected, events any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Append", reflect.TypeOf((*MockStorage)(nil).Append), ctx, contextID, taskID, expected, events)
+}
+
+// AppendContextFile mocks base method.
+func (m *MockStorage) AppendContextFile(ctx context.Context, contextID, path string, data []byte) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AppendContextFile", ctx, contextID, path, data)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// AppendContextFile indicates an expected call of AppendContextFile.
+func (mr *MockStorageMockRecorder) AppendContextFile(ctx, contextID, path, data any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AppendContextFile", reflect.TypeOf((*MockStorage)(nil).AppendContextFile), ctx, contextID, path, data)
+}
+
+// AppendTaskFile mocks base method.
+func (m *MockStorage) AppendTaskFile(ctx context.Context, taskID, path string, data []byte) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AppendTaskFile", ctx, taskID, path, data)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// AppendTaskFile indicates an expected call of AppendTaskFile.
+func (mr *MockStorageMockRecorder) AppendTaskFile(ctx, taskID, path, data any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AppendTaskFile", reflect.TypeOf((*MockStorage)(nil).AppendTaskFile), ctx, taskID, path, data)
 }
 
 // DeleteContextFile mocks base method.
@@ -234,6 +264,36 @@ func (m *MockStorage) Load(ctx context.Context, contextID, taskID string, from u
 func (mr *MockStorageMockRecorder) Load(ctx, contextID, taskID, from, limit any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Load", reflect.TypeOf((*MockStorage)(nil).Load), ctx, contextID, taskID, from, limit)
+}
+
+// OpenContextFile mocks base method.
+func (m *MockStorage) OpenContextFile(ctx context.Context, contextID, path string, flag int, perm os.FileMode) (fs.File, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "OpenContextFile", ctx, contextID, path, flag, perm)
+	ret0, _ := ret[0].(fs.File)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// OpenContextFile indicates an expected call of OpenContextFile.
+func (mr *MockStorageMockRecorder) OpenContextFile(ctx, contextID, path, flag, perm any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OpenContextFile", reflect.TypeOf((*MockStorage)(nil).OpenContextFile), ctx, contextID, path, flag, perm)
+}
+
+// OpenTaskFile mocks base method.
+func (m *MockStorage) OpenTaskFile(ctx context.Context, taskID, path string, flag int, perm os.FileMode) (fs.File, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "OpenTaskFile", ctx, taskID, path, flag, perm)
+	ret0, _ := ret[0].(fs.File)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// OpenTaskFile indicates an expected call of OpenTaskFile.
+func (mr *MockStorageMockRecorder) OpenTaskFile(ctx, taskID, path, flag, perm any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OpenTaskFile", reflect.TypeOf((*MockStorage)(nil).OpenTaskFile), ctx, taskID, path, flag, perm)
 }
 
 // PutContextFile mocks base method.

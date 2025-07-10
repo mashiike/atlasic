@@ -5,6 +5,8 @@ package atlasic
 import (
 	"context"
 	"errors"
+	"io/fs"
+	"os"
 
 	"github.com/mashiike/atlasic/a2a"
 )
@@ -52,14 +54,12 @@ type Storage interface {
 	DeleteTaskPushNotificationConfig(ctx context.Context, taskID, configID string) error
 
 	// Context virtual filesystem operations - enables context-scoped file sharing
-	PutContextFile(ctx context.Context, contextID, path string, data []byte) error
-	GetContextFile(ctx context.Context, contextID, path string) ([]byte, error)
+	OpenContextFile(ctx context.Context, contextID, path string, flag int, perm os.FileMode) (fs.File, error)
 	ListContextFiles(ctx context.Context, contextID, pathPrefix string) ([]string, error)
 	DeleteContextFile(ctx context.Context, contextID, path string) error
 
 	// Task virtual filesystem operations - enables task-scoped file operations
-	PutTaskFile(ctx context.Context, taskID, path string, data []byte) error
-	GetTaskFile(ctx context.Context, taskID, path string) ([]byte, error)
+	OpenTaskFile(ctx context.Context, taskID, path string, flag int, perm os.FileMode) (fs.File, error)
 	ListTaskFiles(ctx context.Context, taskID, pathPrefix string) ([]string, error)
 	DeleteTaskFile(ctx context.Context, taskID, path string) error
 }

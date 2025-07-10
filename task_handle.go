@@ -3,6 +3,8 @@ package atlasic
 import (
 	"context"
 	"fmt"
+	"io/fs"
+	"os"
 
 	"github.com/mashiike/atlasic/a2a"
 )
@@ -23,14 +25,12 @@ type TaskHandle interface {
 	UpsertArtifact(ctx context.Context, artifact a2a.Artifact) error
 
 	// Context virtual filesystem operations - enables context-scoped file sharing
-	PutContextFile(ctx context.Context, path string, data []byte) error
-	GetContextFile(ctx context.Context, path string) ([]byte, error)
+	OpenContextFile(ctx context.Context, path string, flag int, perm os.FileMode) (fs.File, error)
 	ListContextFiles(ctx context.Context, pathPrefix string) ([]string, error)
 	DeleteContextFile(ctx context.Context, path string) error
 
 	// Task virtual filesystem operations - enables task-scoped file operations
-	PutTaskFile(ctx context.Context, path string, data []byte) error
-	GetTaskFile(ctx context.Context, path string) ([]byte, error)
+	OpenTaskFile(ctx context.Context, path string, flag int, perm os.FileMode) (fs.File, error)
 	ListTaskFiles(ctx context.Context, pathPrefix string) ([]string, error)
 	DeleteTaskFile(ctx context.Context, path string) error
 }
@@ -94,12 +94,8 @@ func (h *taskHandle) UpsertArtifact(ctx context.Context, artifact a2a.Artifact) 
 
 // Context virtual filesystem operations
 
-func (h *taskHandle) PutContextFile(ctx context.Context, path string, data []byte) error {
-	return h.svc.Storage.PutContextFile(ctx, h.contextID, path, data)
-}
-
-func (h *taskHandle) GetContextFile(ctx context.Context, path string) ([]byte, error) {
-	return h.svc.Storage.GetContextFile(ctx, h.contextID, path)
+func (h *taskHandle) OpenContextFile(ctx context.Context, path string, flag int, perm os.FileMode) (fs.File, error) {
+	return h.svc.Storage.OpenContextFile(ctx, h.contextID, path, flag, perm)
 }
 
 func (h *taskHandle) ListContextFiles(ctx context.Context, pathPrefix string) ([]string, error) {
@@ -112,12 +108,8 @@ func (h *taskHandle) DeleteContextFile(ctx context.Context, path string) error {
 
 // Task virtual filesystem operations
 
-func (h *taskHandle) PutTaskFile(ctx context.Context, path string, data []byte) error {
-	return h.svc.Storage.PutTaskFile(ctx, h.taskID, path, data)
-}
-
-func (h *taskHandle) GetTaskFile(ctx context.Context, path string) ([]byte, error) {
-	return h.svc.Storage.GetTaskFile(ctx, h.taskID, path)
+func (h *taskHandle) OpenTaskFile(ctx context.Context, path string, flag int, perm os.FileMode) (fs.File, error) {
+	return h.svc.Storage.OpenTaskFile(ctx, h.taskID, path, flag, perm)
 }
 
 func (h *taskHandle) ListTaskFiles(ctx context.Context, pathPrefix string) ([]string, error) {

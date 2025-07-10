@@ -5,7 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
+	"io/fs"
+	"os"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -347,44 +348,9 @@ func (s *S3Storage) DeleteTaskPushNotificationConfig(ctx context.Context, taskID
 
 // Context virtual filesystem operations
 
-func (s *S3Storage) PutContextFile(ctx context.Context, contextID, path string, data []byte) error {
+func (s *S3Storage) OpenContextFile(ctx context.Context, contextID, path string, flag int, perm os.FileMode) (fs.File, error) {
 	key := s.getContextFileKey(contextID, path)
-
-	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket: aws.String(s.bucket),
-		Key:    aws.String(key),
-		Body:   bytes.NewReader(data),
-	})
-
-	if err != nil {
-		return fmt.Errorf("failed to put context file: %w", err)
-	}
-
-	return nil
-}
-
-func (s *S3Storage) GetContextFile(ctx context.Context, contextID, path string) ([]byte, error) {
-	key := s.getContextFileKey(contextID, path)
-
-	result, err := s.client.GetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(s.bucket),
-		Key:    aws.String(key),
-	})
-
-	if err != nil {
-		if strings.Contains(err.Error(), "NoSuchKey") {
-			return nil, atlasic.ErrFileNotFound
-		}
-		return nil, fmt.Errorf("failed to get context file: %w", err)
-	}
-
-	defer result.Body.Close()
-	data, err := io.ReadAll(result.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read context file body: %w", err)
-	}
-
-	return data, nil
+	return newS3File(s.client, s.bucket, key, flag, perm), nil
 }
 
 func (s *S3Storage) ListContextFiles(ctx context.Context, contextID, pathPrefix string) ([]string, error) {
@@ -430,44 +396,9 @@ func (s *S3Storage) DeleteContextFile(ctx context.Context, contextID, path strin
 
 // Task virtual filesystem operations
 
-func (s *S3Storage) PutTaskFile(ctx context.Context, taskID, path string, data []byte) error {
+func (s *S3Storage) OpenTaskFile(ctx context.Context, taskID, path string, flag int, perm os.FileMode) (fs.File, error) {
 	key := s.getTaskFileKey(taskID, path)
-
-	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket: aws.String(s.bucket),
-		Key:    aws.String(key),
-		Body:   bytes.NewReader(data),
-	})
-
-	if err != nil {
-		return fmt.Errorf("failed to put task file: %w", err)
-	}
-
-	return nil
-}
-
-func (s *S3Storage) GetTaskFile(ctx context.Context, taskID, path string) ([]byte, error) {
-	key := s.getTaskFileKey(taskID, path)
-
-	result, err := s.client.GetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(s.bucket),
-		Key:    aws.String(key),
-	})
-
-	if err != nil {
-		if strings.Contains(err.Error(), "NoSuchKey") {
-			return nil, atlasic.ErrFileNotFound
-		}
-		return nil, fmt.Errorf("failed to get task file: %w", err)
-	}
-
-	defer result.Body.Close()
-	data, err := io.ReadAll(result.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read task file body: %w", err)
-	}
-
-	return data, nil
+	return newS3File(s.client, s.bucket, key, flag, perm), nil
 }
 
 func (s *S3Storage) ListTaskFiles(ctx context.Context, taskID, pathPrefix string) ([]string, error) {

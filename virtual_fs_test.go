@@ -2,6 +2,8 @@ package atlasic
 
 import (
 	"context"
+	"io"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -17,18 +19,30 @@ func TestFileSystemStorage_VirtualFS(t *testing.T) {
 	t.Run("Context file operations", func(t *testing.T) {
 		contextID := "test-context-001"
 
-		// Test PutContextFile
+		// Test OpenContextFile for writing
 		data := []byte("test context file content")
-		err := storage.PutContextFile(ctx, contextID, "shared/plan.json", data)
+		file, err := storage.OpenContextFile(ctx, contextID, "shared/plan.json", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 		require.NoError(t, err)
+		writer := file.(io.Writer)
+		_, err = writer.Write(data)
+		require.NoError(t, err)
+		file.Close()
 
 		// Test hierarchical path
-		err = storage.PutContextFile(ctx, contextID, "shared/resources/doc1.txt", []byte("document content"))
+		file2, err := storage.OpenContextFile(ctx, contextID, "shared/resources/doc1.txt", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 		require.NoError(t, err)
+		writer2 := file2.(io.Writer)
+		_, err = writer2.Write([]byte("document content"))
+		require.NoError(t, err)
+		file2.Close()
 
-		// Test GetContextFile
-		retrievedData, err := storage.GetContextFile(ctx, contextID, "shared/plan.json")
+		// Test OpenContextFile for reading
+		file3, err := storage.OpenContextFile(ctx, contextID, "shared/plan.json", os.O_RDONLY, 0)
 		require.NoError(t, err)
+		reader := file3.(io.Reader)
+		retrievedData, err := io.ReadAll(reader)
+		require.NoError(t, err)
+		file3.Close()
 		require.Equal(t, data, retrievedData)
 
 		// Test ListContextFiles
@@ -43,25 +57,37 @@ func TestFileSystemStorage_VirtualFS(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify deletion
-		_, err = storage.GetContextFile(ctx, contextID, "shared/plan.json")
-		require.Equal(t, ErrFileNotFound, err)
+		_, err = storage.OpenContextFile(ctx, contextID, "shared/plan.json", os.O_RDONLY, 0)
+		require.Error(t, err)
 	})
 
 	t.Run("Task file operations", func(t *testing.T) {
 		taskID := "test-task-001"
 
-		// Test PutTaskFile
+		// Test OpenTaskFile for writing
 		data := []byte("test task file content")
-		err := storage.PutTaskFile(ctx, taskID, "work/analysis.txt", data)
+		file, err := storage.OpenTaskFile(ctx, taskID, "work/analysis.txt", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 		require.NoError(t, err)
+		writer := file.(io.Writer)
+		_, err = writer.Write(data)
+		require.NoError(t, err)
+		file.Close()
 
 		// Test hierarchical path
-		err = storage.PutTaskFile(ctx, taskID, "work/output/result.json", []byte(`{"result": "success"}`))
+		file2, err := storage.OpenTaskFile(ctx, taskID, "work/output/result.json", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 		require.NoError(t, err)
+		writer2 := file2.(io.Writer)
+		_, err = writer2.Write([]byte(`{"result": "success"}`))
+		require.NoError(t, err)
+		file2.Close()
 
-		// Test GetTaskFile
-		retrievedData, err := storage.GetTaskFile(ctx, taskID, "work/analysis.txt")
+		// Test OpenTaskFile for reading
+		file3, err := storage.OpenTaskFile(ctx, taskID, "work/analysis.txt", os.O_RDONLY, 0)
 		require.NoError(t, err)
+		reader := file3.(io.Reader)
+		retrievedData, err := io.ReadAll(reader)
+		require.NoError(t, err)
+		file3.Close()
 		require.Equal(t, data, retrievedData)
 
 		// Test ListTaskFiles
@@ -76,8 +102,8 @@ func TestFileSystemStorage_VirtualFS(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify deletion
-		_, err = storage.GetTaskFile(ctx, taskID, "work/analysis.txt")
-		require.Equal(t, ErrFileNotFound, err)
+		_, err = storage.OpenTaskFile(ctx, taskID, "work/analysis.txt", os.O_RDONLY, 0)
+		require.Error(t, err)
 	})
 }
 
@@ -98,14 +124,22 @@ func TestTaskHandle_VirtualFS(t *testing.T) {
 	})
 
 	t.Run("Context file operations via TaskHandle", func(t *testing.T) {
-		// Test PutContextFile
+		// Test OpenContextFile for writing
 		data := []byte("context data from taskhandle")
-		err := handle.PutContextFile(ctx, "shared/state.json", data)
+		file, err := handle.OpenContextFile(ctx, "shared/state.json", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 		require.NoError(t, err)
+		writer := file.(io.Writer)
+		_, err = writer.Write(data)
+		require.NoError(t, err)
+		file.Close()
 
-		// Test GetContextFile
-		retrievedData, err := handle.GetContextFile(ctx, "shared/state.json")
+		// Test OpenContextFile for reading
+		file2, err := handle.OpenContextFile(ctx, "shared/state.json", os.O_RDONLY, 0)
 		require.NoError(t, err)
+		reader := file2.(io.Reader)
+		retrievedData, err := io.ReadAll(reader)
+		require.NoError(t, err)
+		file2.Close()
 		require.Equal(t, data, retrievedData)
 
 		// Test ListContextFiles
@@ -118,19 +152,27 @@ func TestTaskHandle_VirtualFS(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify deletion
-		_, err = handle.GetContextFile(ctx, "shared/state.json")
-		require.Equal(t, ErrFileNotFound, err)
+		_, err = handle.OpenContextFile(ctx, "shared/state.json", os.O_RDONLY, 0)
+		require.Error(t, err)
 	})
 
 	t.Run("Task file operations via TaskHandle", func(t *testing.T) {
-		// Test PutTaskFile
+		// Test OpenTaskFile for writing
 		data := []byte("task data from taskhandle")
-		err := handle.PutTaskFile(ctx, "temp/workspace.json", data)
+		file, err := handle.OpenTaskFile(ctx, "temp/workspace.json", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 		require.NoError(t, err)
+		writer := file.(io.Writer)
+		_, err = writer.Write(data)
+		require.NoError(t, err)
+		file.Close()
 
-		// Test GetTaskFile
-		retrievedData, err := handle.GetTaskFile(ctx, "temp/workspace.json")
+		// Test OpenTaskFile for reading
+		file2, err := handle.OpenTaskFile(ctx, "temp/workspace.json", os.O_RDONLY, 0)
 		require.NoError(t, err)
+		reader := file2.(io.Reader)
+		retrievedData, err := io.ReadAll(reader)
+		require.NoError(t, err)
+		file2.Close()
 		require.Equal(t, data, retrievedData)
 
 		// Test ListTaskFiles
@@ -143,7 +185,7 @@ func TestTaskHandle_VirtualFS(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify deletion
-		_, err = handle.GetTaskFile(ctx, "temp/workspace.json")
-		require.Equal(t, ErrFileNotFound, err)
+		_, err = handle.OpenTaskFile(ctx, "temp/workspace.json", os.O_RDONLY, 0)
+		require.Error(t, err)
 	})
 }

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -190,15 +192,27 @@ func (a *LLMAgent) Execute(ctx context.Context, handle TaskHandle) (*a2a.Message
 
 	a.Logger.Info("Starting ReAct loop", "taskID", handle.GetTaskID(), "contextID", handle.GetContextID())
 
-	// Initialize log buffer
-	var logBuffer strings.Builder
+	// Initialize log state
+	var logEncoder *json.Encoder
+	var inMemoryLogs []ReActLog
 
-	// Ensure logs are flushed regardless of exit path
-	defer func() {
-		if err := a.flushLogBuffer(ctx, handle, &logBuffer); err != nil {
-			a.Logger.Warn("Failed to write ReAct logs", "error", err)
+	// Setup log file for sequential JSONL writing
+	logPath := "llm_agent_log.jsonl"
+	if a.TaskLogFilePath != nil && *a.TaskLogFilePath != "" {
+		logPath = *a.TaskLogFilePath
+	}
+
+	logFile, err := handle.OpenTaskFile(ctx, logPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
+	if err != nil {
+		a.Logger.Warn("Failed to open log file, logging disabled", "error", err, "path", logPath)
+	} else {
+		defer logFile.Close()
+		if writer, ok := logFile.(io.Writer); ok {
+			logEncoder = json.NewEncoder(writer)
+		} else {
+			a.Logger.Warn("Log file does not implement io.Writer, logging disabled", "path", logPath)
 		}
-	}()
+	}
 
 	// Create initial request
 	req, err := a.newGenerateRequest(ctx, handle)
@@ -214,7 +228,7 @@ func (a *LLMAgent) Execute(ctx context.Context, handle TaskHandle) (*a2a.Message
 		a.Logger.Debug("ReAct iteration starting", "iteration", iteration+1, "max", a.MaxIterations)
 
 		// Log LLM request
-		a.writeLogEntry(&logBuffer, ReActLog{
+		log := ReActLog{
 			Iteration: iteration + 1,
 			Type:      "llm_request",
 			Timestamp: time.Now(),
@@ -223,22 +237,34 @@ func (a *LLMAgent) Execute(ctx context.Context, handle TaskHandle) (*a2a.Message
 				"messages": len(req.Messages),
 				"tools":    len(req.Tools),
 			},
-		})
+		}
+		if logEncoder != nil {
+			if err := logEncoder.Encode(log); err != nil {
+				a.Logger.Warn("Failed to write log entry", "error", err)
+			}
+		}
+		inMemoryLogs = append(inMemoryLogs, log)
 
 		// Step 1: Reasoning - Generate response with tool usage
 		response, err := m.Generate(ctx, req)
 		if err != nil {
-			a.writeLogEntry(&logBuffer, ReActLog{
+			log := ReActLog{
 				Iteration: iteration + 1,
 				Type:      "error",
 				Timestamp: time.Now(),
 				Data:      map[string]any{"error": err.Error(), "stage": "llm_generation"},
-			})
+			}
+			if logEncoder != nil {
+				if err := logEncoder.Encode(log); err != nil {
+					a.Logger.Warn("Failed to write log entry", "error", err)
+				}
+			}
+			inMemoryLogs = append(inMemoryLogs, log)
 			return nil, fmt.Errorf("generation failed at iteration %d: %w", iteration+1, err)
 		}
 
 		// Log LLM response
-		a.writeLogEntry(&logBuffer, ReActLog{
+		log = ReActLog{
 			Iteration: iteration + 1,
 			Type:      "llm_response",
 			Timestamp: time.Now(),
@@ -247,7 +273,13 @@ func (a *LLMAgent) Execute(ctx context.Context, handle TaskHandle) (*a2a.Message
 				"stop_reason": response.StopReason,
 				"usage":       response.Usage,
 			},
-		})
+		}
+		if logEncoder != nil {
+			if err := logEncoder.Encode(log); err != nil {
+				a.Logger.Warn("Failed to write log entry", "error", err)
+			}
+		}
+		inMemoryLogs = append(inMemoryLogs, log)
 
 		// Add agent response to request for next iteration
 		req.Messages = append(req.Messages, response.Message)
@@ -255,7 +287,7 @@ func (a *LLMAgent) Execute(ctx context.Context, handle TaskHandle) (*a2a.Message
 		// Step 2: Action - Extract and execute tools
 		toolUses := model.GetToolUseParts(response.Message)
 		if len(toolUses) > 0 {
-			shouldStop, userMessage, stopMessage, err := a.executeToolsAndCollectLogs(ctx, handle, toolUses, iteration+1, &logBuffer)
+			shouldStop, userMessage, stopMessage, err := a.executeToolsAndCollectLogs(ctx, handle, toolUses, iteration+1, logEncoder, &inMemoryLogs)
 			if err != nil {
 				// Check if error is ErrInterrupted from sub-agent
 				if errors.Is(err, ErrInterrupted) {
@@ -266,12 +298,18 @@ func (a *LLMAgent) Execute(ctx context.Context, handle TaskHandle) (*a2a.Message
 				// If tool execution fails, add error to context and continue
 				a.Logger.Warn("Tool execution failed, continuing with error feedback", "error", err, "iteration", iteration+1)
 
-				a.writeLogEntry(&logBuffer, ReActLog{
+				log := ReActLog{
 					Iteration: iteration + 1,
 					Type:      "error",
 					Timestamp: time.Now(),
 					Data:      map[string]any{"error": err.Error(), "stage": "tool_execution"},
-				})
+				}
+				if logEncoder != nil {
+					if err := logEncoder.Encode(log); err != nil {
+						a.Logger.Warn("Failed to write log entry", "error", err)
+					}
+				}
+				inMemoryLogs = append(inMemoryLogs, log)
 
 				// Add error message as user message for next iteration
 				errorMsg := fmt.Sprintf("Tool execution error: %s", err.Error())
@@ -401,7 +439,7 @@ func (a *LLMAgent) newGenerateRequest(ctx context.Context, handle TaskHandle) (*
 }
 
 // executeToolsAndCollectLogs executes tools, collects logs, and handles stop message
-func (a *LLMAgent) executeToolsAndCollectLogs(ctx context.Context, handle TaskHandle, toolUses []*model.ToolUse, iteration int, logBuffer *strings.Builder) (bool, a2a.Message, *a2a.Message, error) {
+func (a *LLMAgent) executeToolsAndCollectLogs(ctx context.Context, handle TaskHandle, toolUses []*model.ToolUse, iteration int, logEncoder *json.Encoder, inMemoryLogs *[]ReActLog) (bool, a2a.Message, *a2a.Message, error) {
 	// Build available tools
 	allTools := a.buildAllTools(ctx, handle, nil)
 
@@ -425,17 +463,23 @@ func (a *LLMAgent) executeToolsAndCollectLogs(ctx context.Context, handle TaskHa
 		}
 
 		if !found {
-			a.writeLogEntry(logBuffer, ReActLog{
+			log := ReActLog{
 				Iteration: iteration,
 				Type:      "error",
 				Timestamp: time.Now(),
 				Data:      map[string]any{"error": fmt.Sprintf("unknown tool: %s", toolUse.ToolName), "tool_name": toolUse.ToolName},
-			})
+			}
+			if logEncoder != nil {
+				if err := logEncoder.Encode(log); err != nil {
+					a.Logger.Warn("Failed to write log entry", "error", err)
+				}
+			}
+			*inMemoryLogs = append(*inMemoryLogs, log)
 			return false, a2a.Message{}, nil, fmt.Errorf("unknown tool: %s", toolUse.ToolName)
 		}
 
 		// Log tool execution start
-		a.writeLogEntry(logBuffer, ReActLog{
+		log := ReActLog{
 			Iteration: iteration,
 			Type:      "tool_execution",
 			Timestamp: time.Now(),
@@ -444,11 +488,17 @@ func (a *LLMAgent) executeToolsAndCollectLogs(ctx context.Context, handle TaskHa
 				"arguments": toolUse.Arguments,
 				"stage":     "start",
 			},
-		})
+		}
+		if logEncoder != nil {
+			if err := logEncoder.Encode(log); err != nil {
+				a.Logger.Warn("Failed to write log entry", "error", err)
+			}
+		}
+		*inMemoryLogs = append(*inMemoryLogs, log)
 
 		result, err := tool.Execute(ctx, toolUse.Arguments)
 		if err != nil {
-			a.writeLogEntry(logBuffer, ReActLog{
+			log := ReActLog{
 				Iteration: iteration,
 				Type:      "error",
 				Timestamp: time.Now(),
@@ -457,12 +507,18 @@ func (a *LLMAgent) executeToolsAndCollectLogs(ctx context.Context, handle TaskHa
 					"tool_name": toolUse.ToolName,
 					"stage":     "execution",
 				},
-			})
+			}
+			if logEncoder != nil {
+				if err := logEncoder.Encode(log); err != nil {
+					a.Logger.Warn("Failed to write log entry", "error", err)
+				}
+			}
+			*inMemoryLogs = append(*inMemoryLogs, log)
 			return false, a2a.Message{}, nil, fmt.Errorf("tool %s execution failed: %w", toolUse.ToolName, err)
 		}
 
 		// Log tool execution result
-		a.writeLogEntry(logBuffer, ReActLog{
+		log = ReActLog{
 			Iteration: iteration,
 			Type:      "tool_execution",
 			Timestamp: time.Now(),
@@ -471,7 +527,13 @@ func (a *LLMAgent) executeToolsAndCollectLogs(ctx context.Context, handle TaskHa
 				"result":    result,
 				"stage":     "completed",
 			},
-		})
+		}
+		if logEncoder != nil {
+			if err := logEncoder.Encode(log); err != nil {
+				a.Logger.Warn("Failed to write log entry", "error", err)
+			}
+		}
+		*inMemoryLogs = append(*inMemoryLogs, log)
 
 		// Add tool result to results
 		results = append(results, model.NewToolResultPart(toolUse.ID, toolUse.ToolName, []a2a.Part{result}))
@@ -497,38 +559,6 @@ func (a *LLMAgent) executeToolsAndCollectLogs(ctx context.Context, handle TaskHa
 	// Create user message with tool results for next LLM iteration
 	userMessage := a2a.NewMessage("tool-results", a2a.RoleUser, results)
 	return shouldStop, userMessage, stopMessage, nil
-}
-
-// writeLogEntry writes a single log entry to the buffer in JSONL format
-func (a *LLMAgent) writeLogEntry(buffer *strings.Builder, log ReActLog) {
-	logData, err := json.Marshal(log)
-	if err != nil {
-		a.Logger.Warn("Failed to marshal log entry", "error", err)
-		return
-	}
-	buffer.Write(logData)
-	buffer.WriteString("\n")
-}
-
-// flushLogBuffer writes buffered logs to task file
-func (a *LLMAgent) flushLogBuffer(ctx context.Context, handle TaskHandle, buffer *strings.Builder) error {
-	if buffer.Len() == 0 {
-		return nil
-	}
-
-	// Get log file path (default if not specified)
-	logPath := "llm_agent_log.jsonl"
-	if a.TaskLogFilePath != nil && *a.TaskLogFilePath != "" {
-		logPath = *a.TaskLogFilePath
-	}
-
-	// Write buffered content to task file
-	if err := handle.PutTaskFile(ctx, logPath, []byte(buffer.String())); err != nil {
-		return fmt.Errorf("failed to write logs to task file: %w", err)
-	}
-
-	a.Logger.Debug("ReAct logs written to task file", "path", logPath, "size", buffer.Len())
-	return nil
 }
 
 // defaultSystemPromptBuilder creates the default system prompt using English markdown format

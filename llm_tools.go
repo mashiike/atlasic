@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/mashiike/atlasic/a2a"
@@ -418,8 +420,19 @@ func (t *TaskFileWriteTool) Execute(ctx context.Context, args map[string]any) (a
 		return a2a.Part{}, fmt.Errorf("content must be a string")
 	}
 
-	err := t.handle.PutTaskFile(ctx, path, []byte(content))
+	// Open file for writing (create if not exists, truncate if exists)
+	file, err := t.handle.OpenTaskFile(ctx, path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
+		return a2a.Part{}, fmt.Errorf("failed to open task file: %w", err)
+	}
+	defer file.Close()
+
+	// Write content
+	writer, ok := file.(io.Writer)
+	if !ok {
+		return a2a.Part{}, fmt.Errorf("file does not implement io.Writer")
+	}
+	if _, err := writer.Write([]byte(content)); err != nil {
 		return a2a.Part{}, fmt.Errorf("failed to write task file: %w", err)
 	}
 
@@ -475,7 +488,19 @@ func (t *TaskFileReadTool) Execute(ctx context.Context, args map[string]any) (a2
 		return a2a.Part{}, fmt.Errorf("path must be a string")
 	}
 
-	data, err := t.handle.GetTaskFile(ctx, path)
+	// Open file for reading
+	file, err := t.handle.OpenTaskFile(ctx, path, os.O_RDONLY, 0)
+	if err != nil {
+		return a2a.Part{}, fmt.Errorf("failed to open task file: %w", err)
+	}
+	defer file.Close()
+
+	// Read content
+	reader, ok := file.(io.Reader)
+	if !ok {
+		return a2a.Part{}, fmt.Errorf("file does not implement io.Reader")
+	}
+	data, err := io.ReadAll(reader)
 	if err != nil {
 		return a2a.Part{}, fmt.Errorf("failed to read task file: %w", err)
 	}
@@ -665,8 +690,19 @@ func (t *ContextFileWriteTool) Execute(ctx context.Context, args map[string]any)
 		return a2a.Part{}, fmt.Errorf("content must be a string")
 	}
 
-	err := t.handle.PutContextFile(ctx, path, []byte(content))
+	// Open file for writing (create if not exists, truncate if exists)
+	file, err := t.handle.OpenContextFile(ctx, path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
+		return a2a.Part{}, fmt.Errorf("failed to open context file: %w", err)
+	}
+	defer file.Close()
+
+	// Write content
+	writer, ok := file.(io.Writer)
+	if !ok {
+		return a2a.Part{}, fmt.Errorf("file does not implement io.Writer")
+	}
+	if _, err := writer.Write([]byte(content)); err != nil {
 		return a2a.Part{}, fmt.Errorf("failed to write context file: %w", err)
 	}
 
@@ -722,7 +758,19 @@ func (t *ContextFileReadTool) Execute(ctx context.Context, args map[string]any) 
 		return a2a.Part{}, fmt.Errorf("path must be a string")
 	}
 
-	data, err := t.handle.GetContextFile(ctx, path)
+	// Open file for reading
+	file, err := t.handle.OpenContextFile(ctx, path, os.O_RDONLY, 0)
+	if err != nil {
+		return a2a.Part{}, fmt.Errorf("failed to open context file: %w", err)
+	}
+	defer file.Close()
+
+	// Read content
+	reader, ok := file.(io.Reader)
+	if !ok {
+		return a2a.Part{}, fmt.Errorf("file does not implement io.Reader")
+	}
+	data, err := io.ReadAll(reader)
 	if err != nil {
 		return a2a.Part{}, fmt.Errorf("failed to read context file: %w", err)
 	}
