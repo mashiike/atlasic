@@ -157,7 +157,7 @@ func TestLLMAgent_RequestOptions(t *testing.T) {
 				Instructions:   "Test instructions",
 				RequestOptions: tt.reqOptions,
 				// Set custom builders to avoid model lookup
-				SystemPromptBuilder: func(ctx context.Context, handle TaskHandle, agent *LLMAgent) (string, error) {
+				SystemPromptBuilder: func(ctx context.Context, handle TaskHandle, agent *LLMAgent, summary string) (string, error) {
 					return "test system prompt", nil
 				},
 				MessagesBuilder: func(ctx context.Context, handle TaskHandle, agent *LLMAgent) ([]a2a.Message, []ExecutableTool, error) {
@@ -170,7 +170,7 @@ func TestLLMAgent_RequestOptions(t *testing.T) {
 				},
 			}
 
-			req, err := agent.newGenerateRequest(ctx, mockHandle)
+			req, err := agent.newGenerateRequestWithSummary(ctx, mockHandle, "")
 			if tt.expectError && err == nil {
 				t.Error("Expected error but got none")
 			}
@@ -218,7 +218,7 @@ func TestLLMAgent_RequestOptions_CoreFieldProtection(t *testing.T) {
 				}
 			},
 		},
-		SystemPromptBuilder: func(ctx context.Context, handle TaskHandle, agent *LLMAgent) (string, error) {
+		SystemPromptBuilder: func(ctx context.Context, handle TaskHandle, agent *LLMAgent, summary string) (string, error) {
 			return "protected system prompt", nil
 		},
 		MessagesBuilder: func(ctx context.Context, handle TaskHandle, agent *LLMAgent) ([]a2a.Message, []ExecutableTool, error) {
@@ -231,7 +231,7 @@ func TestLLMAgent_RequestOptions_CoreFieldProtection(t *testing.T) {
 		},
 	}
 
-	req, err := agent.newGenerateRequest(ctx, mockHandle)
+	req, err := agent.newGenerateRequestWithSummary(ctx, mockHandle, "")
 	if err != nil {
 		t.Fatalf("Expected no error but got: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestLLMAgent_RequestOptions_BedrockThinking(t *testing.T) {
 				}
 			},
 		},
-		SystemPromptBuilder: func(ctx context.Context, handle TaskHandle, agent *LLMAgent) (string, error) {
+		SystemPromptBuilder: func(ctx context.Context, handle TaskHandle, agent *LLMAgent, summary string) (string, error) {
 			return "test system prompt", nil
 		},
 		MessagesBuilder: func(ctx context.Context, handle TaskHandle, agent *LLMAgent) ([]a2a.Message, []ExecutableTool, error) {
@@ -312,7 +312,7 @@ func TestLLMAgent_RequestOptions_BedrockThinking(t *testing.T) {
 		},
 	}
 
-	req, err := agent.newGenerateRequest(ctx, mockHandle)
+	req, err := agent.newGenerateRequestWithSummary(ctx, mockHandle, "")
 	if err != nil {
 		t.Fatalf("Expected no error but got: %v", err)
 	}
@@ -367,7 +367,7 @@ func TestLLMAgent_RequestOptions_DefaultsAppliedWhenNotSet(t *testing.T) {
 				}
 			},
 		},
-		SystemPromptBuilder: func(ctx context.Context, handle TaskHandle, agent *LLMAgent) (string, error) {
+		SystemPromptBuilder: func(ctx context.Context, handle TaskHandle, agent *LLMAgent, summary string) (string, error) {
 			return "test system prompt", nil
 		},
 		MessagesBuilder: func(ctx context.Context, handle TaskHandle, agent *LLMAgent) ([]a2a.Message, []ExecutableTool, error) {
@@ -380,7 +380,7 @@ func TestLLMAgent_RequestOptions_DefaultsAppliedWhenNotSet(t *testing.T) {
 		},
 	}
 
-	req, err := agent.newGenerateRequest(ctx, mockHandle)
+	req, err := agent.newGenerateRequestWithSummary(ctx, mockHandle, "")
 	if err != nil {
 		t.Fatalf("Expected no error but got: %v", err)
 	}
@@ -432,7 +432,7 @@ func TestLLMAgent_RequestOptions_NoOverwriteExistingOptions(t *testing.T) {
 				}
 			},
 		},
-		SystemPromptBuilder: func(ctx context.Context, handle TaskHandle, agent *LLMAgent) (string, error) {
+		SystemPromptBuilder: func(ctx context.Context, handle TaskHandle, agent *LLMAgent, summary string) (string, error) {
 			return "test system prompt", nil
 		},
 		MessagesBuilder: func(ctx context.Context, handle TaskHandle, agent *LLMAgent) ([]a2a.Message, []ExecutableTool, error) {
@@ -445,7 +445,7 @@ func TestLLMAgent_RequestOptions_NoOverwriteExistingOptions(t *testing.T) {
 		},
 	}
 
-	req, err := agent.newGenerateRequest(ctx, mockHandle)
+	req, err := agent.newGenerateRequestWithSummary(ctx, mockHandle, "")
 	if err != nil {
 		t.Fatalf("Expected no error but got: %v", err)
 	}

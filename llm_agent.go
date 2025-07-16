@@ -40,11 +40,19 @@ type LLMAgent struct {
 	SubAgents       []Agent          `json:"-"` // Available sub-agents for delegation
 
 	// Customizable prompt builders
-	SystemPromptBuilder func(ctx context.Context, handle TaskHandle, agent *LLMAgent) (string, error)
+	SystemPromptBuilder func(ctx context.Context, handle TaskHandle, agent *LLMAgent, summary string) (string, error)
 	MessagesBuilder     func(ctx context.Context, handle TaskHandle, agent *LLMAgent) ([]a2a.Message, []ExecutableTool, error)
 
 	// RequestOptions allows customization of model.GenerateRequest
 	RequestOptions []func(*model.GenerateRequest) `json:"-"`
+
+	// Summarizer for managing ReAct execution logs
+	Summarizer Summarizer `json:"-"`
+
+	// Summarizer trigger settings
+	SummarizerTriggerIterations int `json:"summarizer_trigger_iterations"` // Trigger summarization after N iterations (default: 5)
+	SummarizerMaxTokens         int `json:"summarizer_max_tokens"`         // Trigger summarization when input tokens exceed threshold (default: 8000)
+	SummarizerMaxHistory        int `json:"summarizer_max_history"`        // Keep last N messages after summarization (default: 2)
 }
 
 // GetMetadata implements Agent interface
@@ -105,6 +113,15 @@ func (a *LLMAgent) fillDefaults() {
 	}
 	if a.MessagesBuilder == nil {
 		a.MessagesBuilder = defaultMessagesBuilder
+	}
+	if a.SummarizerTriggerIterations <= 0 {
+		a.SummarizerTriggerIterations = 5
+	}
+	if a.SummarizerMaxTokens <= 0 {
+		a.SummarizerMaxTokens = 8000
+	}
+	if a.SummarizerMaxHistory <= 0 {
+		a.SummarizerMaxHistory = 2
 	}
 }
 
@@ -214,8 +231,11 @@ func (a *LLMAgent) Execute(ctx context.Context, handle TaskHandle) (*a2a.Message
 		}
 	}
 
+	// Initialize summarization state
+	var currentSummary string
+
 	// Create initial request
-	req, err := a.newGenerateRequest(ctx, handle)
+	req, err := a.newGenerateRequestWithSummary(ctx, handle, currentSummary)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create initial request: %w", err)
 	}
@@ -226,6 +246,21 @@ func (a *LLMAgent) Execute(ctx context.Context, handle TaskHandle) (*a2a.Message
 	// ReAct loop
 	for iteration := 0; iteration < a.MaxIterations; iteration++ {
 		a.Logger.Debug("ReAct iteration starting", "iteration", iteration+1, "max", a.MaxIterations)
+
+		// Check and perform summarization if needed
+		newSummary, newReq, newLogs, err := a.checkAndPerformSummarization(ctx, handle, iteration, req, currentSummary, inMemoryLogs)
+		if err != nil {
+			return nil, err
+		}
+		if newSummary != currentSummary {
+			currentSummary = newSummary
+		}
+		if newReq != nil {
+			req = newReq
+		}
+		if newLogs != nil {
+			inMemoryLogs = newLogs
+		}
 
 		// Log LLM request
 		log := ReActLog{
@@ -285,53 +320,14 @@ func (a *LLMAgent) Execute(ctx context.Context, handle TaskHandle) (*a2a.Message
 		req.Messages = append(req.Messages, response.Message)
 
 		// Step 2: Action - Extract and execute tools
-		toolUses := model.GetToolUseParts(response.Message)
-		if len(toolUses) > 0 {
-			shouldStop, userMessage, stopMessage, err := a.executeToolsAndCollectLogs(ctx, handle, toolUses, iteration+1, logEncoder, &inMemoryLogs)
+		_, finalMsg, newExitReason, shouldReturn, err := a.handleToolExecution(ctx, handle, response.Message, iteration+1, req, logEncoder, &inMemoryLogs)
+		if shouldReturn {
 			if err != nil {
-				// Check if error is ErrInterrupted from sub-agent
-				if errors.Is(err, ErrInterrupted) {
-					a.Logger.Info("ReAct loop ended due to sub-agent interruption", "iteration", iteration+1, "error", err)
-					return nil, err
-				}
-
-				// If tool execution fails, add error to context and continue
-				a.Logger.Warn("Tool execution failed, continuing with error feedback", "error", err, "iteration", iteration+1)
-
-				log := ReActLog{
-					Iteration: iteration + 1,
-					Type:      "error",
-					Timestamp: time.Now(),
-					Data:      map[string]any{"error": err.Error(), "stage": "tool_execution"},
-				}
-				if logEncoder != nil {
-					if err := logEncoder.Encode(log); err != nil {
-						a.Logger.Warn("Failed to write log entry", "error", err)
-					}
-				}
-				inMemoryLogs = append(inMemoryLogs, log)
-
-				// Add error message as user message for next iteration
-				errorMsg := fmt.Sprintf("Tool execution error: %s", err.Error())
-				userErrorMessage := a2a.NewMessage("tool-error", a2a.RoleUser, []a2a.Part{a2a.NewTextPart(errorMsg)})
-				req.Messages = append(req.Messages, userErrorMessage)
-			} else {
-				// Add tool results as user message
-				req.Messages = append(req.Messages, userMessage)
-
-				if shouldStop {
-					a.Logger.Info("ReAct loop ended by tool", "iteration", iteration+1)
-					finalResponse = stopMessage
-					exitReason = "tool_stop"
-					break
-				}
+				return nil, err
 			}
-		} else {
-			// No tools used - prompt to use tools or stop
-			promptMessage := a2a.NewMessage("system-prompt", a2a.RoleUser, []a2a.Part{
-				a2a.NewTextPart("Please use appropriate tools to complete the task, or call the 'stop' tool when finished."),
-			})
-			req.Messages = append(req.Messages, promptMessage)
+			finalResponse = finalMsg
+			exitReason = newExitReason
+			break
 		}
 
 		// Step 3: Observation - Task state is updated through TaskHandle
@@ -386,10 +382,10 @@ func (a *LLMAgent) Execute(ctx context.Context, handle TaskHandle) (*a2a.Message
 	}
 }
 
-// newGenerateRequest creates initial generate request with system prompt, messages and tools
-func (a *LLMAgent) newGenerateRequest(ctx context.Context, handle TaskHandle) (*model.GenerateRequest, error) {
-	// Build system prompt
-	systemPrompt, err := a.SystemPromptBuilder(ctx, handle, a)
+// newGenerateRequestWithSummary creates generate request with system prompt (including summary), messages and tools
+func (a *LLMAgent) newGenerateRequestWithSummary(ctx context.Context, handle TaskHandle, summary string) (*model.GenerateRequest, error) {
+	// Build system prompt with summary
+	systemPrompt, err := a.SystemPromptBuilder(ctx, handle, a, summary)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build system prompt: %w", err)
 	}
@@ -562,7 +558,7 @@ func (a *LLMAgent) executeToolsAndCollectLogs(ctx context.Context, handle TaskHa
 }
 
 // defaultSystemPromptBuilder creates the default system prompt using English markdown format
-func defaultSystemPromptBuilder(ctx context.Context, handle TaskHandle, agent *LLMAgent) (string, error) {
+func defaultSystemPromptBuilder(ctx context.Context, handle TaskHandle, agent *LLMAgent, summary string) (string, error) {
 	var sb strings.Builder
 
 	// Header
@@ -570,6 +566,15 @@ func defaultSystemPromptBuilder(ctx context.Context, handle TaskHandle, agent *L
 	sb.WriteString("## Your Role\n")
 	sb.WriteString("You are an intelligent agent operating within the A2A (Agent-to-Agent) task management system. ")
 	sb.WriteString("Your goal is to help users accomplish their tasks efficiently through a ReAct (Reasoning and Acting) loop.\n\n")
+
+	// Add execution summary if available
+	if summary != "" {
+		sb.WriteString("## Previous Execution Summary\n")
+		sb.WriteString("Based on your previous ReAct loop executions, here's a summary of key insights and patterns:\n\n")
+		sb.WriteString(summary)
+		sb.WriteString("\n\n")
+		sb.WriteString("Use this context to inform your decision-making and avoid repeating past mistakes or unnecessary actions.\n\n")
+	}
 
 	// User instructions
 	sb.WriteString("## Instructions\n")
@@ -660,4 +665,110 @@ func defaultMessagesBuilder(ctx context.Context, handle TaskHandle, agent *LLMAg
 	}
 
 	return builder.Messages(), additionalTools, nil
+}
+
+// checkAndPerformSummarization checks if summarization should be triggered and performs it if needed
+func (a *LLMAgent) checkAndPerformSummarization(ctx context.Context, handle TaskHandle, iteration int, req *model.GenerateRequest, currentSummary string, inMemoryLogs []ReActLog) (string, *model.GenerateRequest, []ReActLog, error) {
+	// Check if summarization should be triggered
+	shouldSummarize := false
+	if a.Summarizer != nil {
+		// Trigger by iteration count
+		if iteration > 0 && iteration%a.SummarizerTriggerIterations == 0 {
+			shouldSummarize = true
+			a.Logger.Debug("Summarization triggered by iteration count", "iteration", iteration+1, "trigger", a.SummarizerTriggerIterations)
+		}
+		// Trigger by token count (approximate)
+		if !shouldSummarize && len(req.Messages) > 0 {
+			totalTokens := len(req.System) + len(fmt.Sprintf("%v", req.Messages)) // Rough approximation
+			if totalTokens > a.SummarizerMaxTokens {
+				shouldSummarize = true
+				a.Logger.Debug("Summarization triggered by token count", "estimated_tokens", totalTokens, "threshold", a.SummarizerMaxTokens)
+			}
+		}
+	}
+
+	// Perform summarization if triggered
+	if shouldSummarize && len(inMemoryLogs) > 0 {
+		a.Logger.Info("Starting summarization", "logs_count", len(inMemoryLogs), "iteration", iteration+1)
+
+		newSummary, err := a.Summarizer.Summarize(ctx, handle, currentSummary, inMemoryLogs)
+		if err != nil {
+			a.Logger.Warn("Summarization failed, continuing without summary", "error", err)
+			return currentSummary, req, inMemoryLogs, nil
+		}
+
+		a.Logger.Info("Summarization completed", "summary_length", len(newSummary))
+
+		// Clear in-memory logs after successful summarization
+		clearedLogs := []ReActLog{}
+
+		// Rebuild request with new summary and reduced message history
+		newReq, err := a.newGenerateRequestWithSummary(ctx, handle, newSummary)
+		if err != nil {
+			return "", nil, nil, fmt.Errorf("failed to rebuild request with summary: %w", err)
+		}
+
+		// Limit message history to keep only recent messages
+		if len(newReq.Messages) > a.SummarizerMaxHistory {
+			totalBefore := len(newReq.Messages)
+			newReq.Messages = newReq.Messages[len(newReq.Messages)-a.SummarizerMaxHistory:]
+			a.Logger.Debug("Limited message history after summarization", "kept_messages", len(newReq.Messages), "total_before", totalBefore)
+		}
+
+		return newSummary, newReq, clearedLogs, nil
+	}
+
+	return currentSummary, req, inMemoryLogs, nil
+}
+
+// handleToolExecution handles tool execution and returns whether to stop the loop
+func (a *LLMAgent) handleToolExecution(ctx context.Context, handle TaskHandle, responseMessage a2a.Message, iteration int, req *model.GenerateRequest, logEncoder *json.Encoder, inMemoryLogs *[]ReActLog) (bool, *a2a.Message, string, bool, error) {
+	toolUses := model.GetToolUseParts(responseMessage)
+	if len(toolUses) > 0 {
+		shouldStop, userMessage, stopMessage, err := a.executeToolsAndCollectLogs(ctx, handle, toolUses, iteration, logEncoder, inMemoryLogs)
+		if err != nil {
+			// Check if error is ErrInterrupted from sub-agent
+			if errors.Is(err, ErrInterrupted) {
+				a.Logger.Info("ReAct loop ended due to sub-agent interruption", "iteration", iteration, "error", err)
+				return false, nil, "", true, err
+			}
+
+			// If tool execution fails, add error to context and continue
+			a.Logger.Warn("Tool execution failed, continuing with error feedback", "error", err, "iteration", iteration)
+
+			log := ReActLog{
+				Iteration: iteration,
+				Type:      "error",
+				Timestamp: time.Now(),
+				Data:      map[string]any{"error": err.Error(), "stage": "tool_execution"},
+			}
+			if logEncoder != nil {
+				if err := logEncoder.Encode(log); err != nil {
+					a.Logger.Warn("Failed to write log entry", "error", err)
+				}
+			}
+			*inMemoryLogs = append(*inMemoryLogs, log)
+
+			// Add error message as user message for next iteration
+			errorMsg := fmt.Sprintf("Tool execution error: %s", err.Error())
+			userErrorMessage := a2a.NewMessage("tool-error", a2a.RoleUser, []a2a.Part{a2a.NewTextPart(errorMsg)})
+			req.Messages = append(req.Messages, userErrorMessage)
+		} else {
+			// Add tool results as user message
+			req.Messages = append(req.Messages, userMessage)
+
+			if shouldStop {
+				a.Logger.Info("ReAct loop ended by tool", "iteration", iteration)
+				return true, stopMessage, "tool_stop", true, nil
+			}
+		}
+	} else {
+		// No tools used - prompt to use tools or stop
+		promptMessage := a2a.NewMessage("system-prompt", a2a.RoleUser, []a2a.Part{
+			a2a.NewTextPart("Please use appropriate tools to complete the task, or call the 'stop' tool when finished."),
+		})
+		req.Messages = append(req.Messages, promptMessage)
+	}
+
+	return false, nil, "", false, nil
 }
