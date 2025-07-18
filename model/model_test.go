@@ -3,11 +3,12 @@ package model
 import (
 	"context"
 	"errors"
-	"fmt"
 	"reflect"
 	"testing"
 
 	"github.com/mashiike/atlasic/a2a"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 )
 
 func TestToolResultPart_DirectUsage(t *testing.T) {
@@ -253,61 +254,26 @@ func TestHasToolResultParts_and_GetToolResultParts(t *testing.T) {
 	}
 }
 
-// MockModel for testing
-type MockModel struct {
-	id     string
-	result *GenerateResponse
-	err    error
-}
-
-func (m *MockModel) ID() string {
-	return m.id
-}
-
-func (m *MockModel) Generate(ctx context.Context, req *GenerateRequest) (*GenerateResponse, error) {
-	return m.result, m.err
-}
-
-func (m *MockModel) InputModes() []string {
-	return []string{"text"}
-}
-
-func (m *MockModel) OutputModes() []string {
-	return []string{"text"}
-}
-
-// MockModelProvider for testing
-type MockModelProvider struct {
-	models map[string]Model
-}
-
-func (p *MockModelProvider) GetModel(ctx context.Context, modelID string) (Model, error) {
-	model, exists := p.models[modelID]
-	if !exists {
-		return nil, fmt.Errorf("model %s not found", modelID)
-	}
-	return model, nil
-}
-
 func TestModelHooks_PreGenerateHook(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
 	// Create a test registry
 	registry := &Registry{
 		providers: make(map[string]ModelProvider),
 		hooks:     &ModelHooks{},
 	}
 
-	// Create mock provider and model
-	mockProvider := &MockModelProvider{
-		models: map[string]Model{
-			"test-model": &MockModel{
-				id: "test-model",
-				result: &GenerateResponse{
-					Message:    a2a.NewMessage("test-response-1", a2a.RoleAgent, []a2a.Part{a2a.NewTextPart("Test response")}),
-					StopReason: StopReasonEndTurn,
-				},
-			},
-		},
-	}
+	// Create mock model
+	mockModel := NewMockModel(ctrl)
+	mockModel.EXPECT().Generate(gomock.Any(), gomock.Any()).Return(&GenerateResponse{
+		Message:    a2a.NewMessage("test-response-1", a2a.RoleAgent, []a2a.Part{a2a.NewTextPart("Test response")}),
+		StopReason: StopReasonEndTurn,
+	}, nil)
+
+	// Create mock provider
+	mockProvider := NewMockModelProvider(ctrl)
+	mockProvider.EXPECT().GetModel(gomock.Any(), "test-model").Return(mockModel, nil).AnyTimes()
 
 	// Register provider
 	registry.Register("test-provider", mockProvider)
@@ -329,9 +295,7 @@ func TestModelHooks_PreGenerateHook(t *testing.T) {
 
 	// Get model (should be wrapped with hooks)
 	model, err := registry.GetModel(context.Background(), "test-provider", "test-model")
-	if err != nil {
-		t.Fatalf("Failed to get model: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Call Generate
 	req := &GenerateRequest{
@@ -341,33 +305,29 @@ func TestModelHooks_PreGenerateHook(t *testing.T) {
 	}
 
 	_, err = model.Generate(context.Background(), req)
-	if err != nil {
-		t.Fatalf("Failed to generate: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Verify hooks were called
-	if !preHookCalled {
-		t.Error("Pre-generate hook was not called")
-	}
-
-	if !postHookCalled {
-		t.Error("Post-generate hook was not called")
-	}
+	require.True(t, preHookCalled, "Pre-generate hook was not called")
+	require.True(t, postHookCalled, "Post-generate hook was not called")
 }
 
 func TestModelHooks_PreGenerateHookError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
 	// Create a test registry
 	registry := &Registry{
 		providers: make(map[string]ModelProvider),
 		hooks:     &ModelHooks{},
 	}
 
-	// Create mock provider and model
-	mockProvider := &MockModelProvider{
-		models: map[string]Model{
-			"test-model": &MockModel{id: "test-model"},
-		},
-	}
+	// Create mock model (should not be called due to pre-hook error)
+	mockModel := NewMockModel(ctrl)
+
+	// Create mock provider
+	mockProvider := NewMockModelProvider(ctrl)
+	mockProvider.EXPECT().GetModel(gomock.Any(), "test-model").Return(mockModel, nil).AnyTimes()
 
 	// Register provider
 	registry.Register("test-provider", mockProvider)
@@ -379,9 +339,7 @@ func TestModelHooks_PreGenerateHookError(t *testing.T) {
 
 	// Get model
 	model, err := registry.GetModel(context.Background(), "test-provider", "test-model")
-	if err != nil {
-		t.Fatalf("Failed to get model: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Call Generate (should fail due to pre-hook error)
 	req := &GenerateRequest{
@@ -391,58 +349,57 @@ func TestModelHooks_PreGenerateHookError(t *testing.T) {
 	}
 
 	_, err = model.Generate(context.Background(), req)
-	if err == nil {
-		t.Error("Expected error from pre-hook, but got nil")
-	}
-
-	if err.Error() != "pre-generate hook failed: pre-hook error" {
-		t.Errorf("Expected specific error message, got: %v", err)
-	}
+	require.Error(t, err)
+	require.Equal(t, "pre-generate hook failed: pre-hook error", err.Error())
 }
 
 func TestModelHooks_WithoutHooks(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
 	// Create a test registry
 	registry := &Registry{
 		providers: make(map[string]ModelProvider),
 		hooks:     &ModelHooks{},
 	}
 
-	// Create mock provider and model
-	mockModel := &MockModel{id: "test-model"}
-	mockProvider := &MockModelProvider{
-		models: map[string]Model{"test-model": mockModel},
-	}
+	// Create mock model
+	mockModel := NewMockModel(ctrl)
+	mockProvider := NewMockModelProvider(ctrl)
+	mockProvider.EXPECT().GetModel(gomock.Any(), "test-model").Return(mockModel, nil).AnyTimes()
 
 	// Register provider without hooks
 	registry.Register("test-provider", mockProvider)
 
 	// Get model (should return original model, not wrapped)
 	model, err := registry.GetModel(context.Background(), "test-provider", "test-model")
-	if err != nil {
-		t.Fatalf("Failed to get model: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Should return the original model, not a HookedModel
-	if _, isHooked := model.(*HookedModel); isHooked {
-		t.Error("Expected original model, but got HookedModel when no hooks are registered")
-	}
+	_, isHooked := model.(*HookedModel)
+	require.False(t, isHooked, "Expected original model, but got HookedModel when no hooks are registered")
 
 	// Should be the same instance
-	if model != mockModel {
-		t.Error("Expected same model instance when no hooks are registered")
-	}
+	require.Equal(t, mockModel, model, "Expected same model instance when no hooks are registered")
 }
 
 func TestGlobalRegistryHooks(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create mock model
+	mockModel := NewMockModel(ctrl)
+	mockModel.EXPECT().Generate(gomock.Any(), gomock.Any()).Return(&GenerateResponse{
+		Message:    a2a.NewMessage("global-response", a2a.RoleAgent, []a2a.Part{a2a.NewTextPart("Global test response")}),
+		StopReason: StopReasonEndTurn,
+	}, nil)
+
 	// Test global registry functions
-	testProvider := &MockModelProvider{
-		models: map[string]Model{
-			"global-test": &MockModel{id: "global-test"},
-		},
-	}
+	testProvider := NewMockModelProvider(ctrl)
+	testProvider.EXPECT().GetModel(gomock.Any(), "global-test").Return(mockModel, nil).AnyTimes()
 
 	// Register with global registry
-	Register("global-provider", testProvider)
+	Register("global-provider-unique", testProvider)
 
 	// Track hook calls
 	var preHookCalled bool
@@ -460,15 +417,12 @@ func TestGlobalRegistryHooks(t *testing.T) {
 	})
 
 	// Get model via global function
-	model, err := GetModel(context.Background(), "global-provider", "global-test")
-	if err != nil {
-		t.Fatalf("Failed to get model: %v", err)
-	}
+	model, err := GetModel(context.Background(), "global-provider-unique", "global-test")
+	require.NoError(t, err)
 
 	// Should be wrapped with hooks
-	if _, isHooked := model.(*HookedModel); !isHooked {
-		t.Error("Expected HookedModel when hooks are registered")
-	}
+	_, isHooked := model.(*HookedModel)
+	require.True(t, isHooked, "Expected HookedModel when hooks are registered")
 
 	// Call Generate
 	_, err = model.Generate(context.Background(), &GenerateRequest{
@@ -476,16 +430,9 @@ func TestGlobalRegistryHooks(t *testing.T) {
 			a2a.NewMessage("test-req-3", a2a.RoleUser, []a2a.Part{a2a.NewTextPart("Hello")}),
 		},
 	})
-	if err != nil {
-		t.Fatalf("Failed to generate: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Verify hooks were called
-	if !preHookCalled {
-		t.Error("Global pre-generate hook was not called")
-	}
-
-	if !postHookCalled {
-		t.Error("Global post-generate hook was not called")
-	}
+	require.True(t, preHookCalled, "Global pre-generate hook was not called")
+	require.True(t, postHookCalled, "Global post-generate hook was not called")
 }
