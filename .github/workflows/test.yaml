@@ -9,12 +9,26 @@ jobs:
           - "1.24"
     name: Build
     runs-on: ubuntu-latest
+
     steps:
       - name: Set up Go
         uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5
         with:
           go-version: ${{ matrix.go }}
         id: go
+      - name: Start services via docker-compose
+        run: docker compose up -d
+
+      - name: Wait for MinIO and ElasticMQ
+        run: |
+          echo "Waiting for MinIO..."
+          for i in {1..10}; do
+            curl -f http://localhost:9000/minio/health/live && break || sleep 5
+          done
+          echo "Waiting for ElasticMQ..."
+          for i in {1..10}; do
+            curl -f http://localhost:9324/ && break || sleep 5
+          done
 
       - name: Check out code into the Go module directory
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
