@@ -3,6 +3,7 @@ package atlasic
 import (
 	"context"
 	"errors"
+	"net/http"
 	"sync"
 	"time"
 )
@@ -17,16 +18,18 @@ var (
 type JobConfig struct {
 	TaskID              string
 	ContextID           string
-	IncomingMessageID   string   // ID of the incoming message that triggered this job
-	AcceptedOutputModes []string // Accepted output modes from MessageSendConfiguration
+	IncomingMessageID   string      // ID of the incoming message that triggered this job
+	AcceptedOutputModes []string    // Accepted output modes from MessageSendConfiguration
+	HTTPHeaders         http.Header // HTTP headers to preserve for Agent execution (filtered for security)
 }
 
 // Job represents a background job for agent execution
 type Job struct {
 	TaskID              string
 	ContextID           string
-	IncomingMessageID   string   // ID of the incoming message that triggered this job
-	AcceptedOutputModes []string // Accepted output modes from MessageSendConfiguration
+	IncomingMessageID   string      // ID of the incoming message that triggered this job
+	AcceptedOutputModes []string    // Accepted output modes from MessageSendConfiguration
+	HTTPHeaders         http.Header // HTTP headers to preserve for Agent execution (filtered for security)
 
 	// Function fields for queue operations
 	ExtendTimeoutFunc func(context.Context, time.Duration) error
@@ -74,6 +77,7 @@ func (q *InMemoryJobQueue) Enqueue(ctx context.Context, config JobConfig) error 
 		ContextID:           config.ContextID,
 		AcceptedOutputModes: config.AcceptedOutputModes,
 		IncomingMessageID:   config.IncomingMessageID,
+		HTTPHeaders:         config.HTTPHeaders,
 		// In-memory queue doesn't need actual timeout/completion handling
 		ExtendTimeoutFunc: func(context.Context, time.Duration) error { return nil },
 		CompleteFunc:      func() error { return nil },

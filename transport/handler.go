@@ -289,6 +289,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Process Extension activation
 	ctx := r.Context()
+	// Add HTTP headers to context for Agent access
+	ctx = WithHTTPHeaders(ctx, r.Header)
 	extensionHeader := r.Header.Get("X-A2A-Extensions")
 	requested := ParseExtensionHeader(extensionHeader)
 

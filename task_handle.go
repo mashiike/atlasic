@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"os"
 
 	"github.com/mashiike/atlasic/a2a"
@@ -17,6 +18,7 @@ type TaskHandle interface {
 	GetInitialStatus() a2a.TaskStatus // Get task status at the time of dequeue/creation
 	GetAcceptedOutputModes() []string // Get accepted output modes for this task
 	GetIncomingMessage() a2a.Message  // Get the incoming message that triggered this task
+	GetHTTPHeaders() http.Header      // Get HTTP headers from the original request
 
 	// Task state mutations - implementation handles streaming notifications automatically
 	// Role is fixed to RoleAgent for all TaskHandle operations
@@ -44,6 +46,7 @@ type taskHandle struct {
 	initialStatus       a2a.TaskStatus // Status at the time of task handle creation
 	acceptedOutputModes []string       // Accepted output modes for this task
 	incomingMessage     a2a.Message    // The incoming message that triggered this task
+	httpHeaders         http.Header    // HTTP headers from the original request
 }
 
 func (h *taskHandle) GetContextID() string {
@@ -73,6 +76,10 @@ func (h *taskHandle) GetTask(ctx context.Context, historyLength int) (*a2a.Task,
 
 func (h *taskHandle) GetIncomingMessage() a2a.Message {
 	return h.incomingMessage
+}
+
+func (h *taskHandle) GetHTTPHeaders() http.Header {
+	return h.httpHeaders
 }
 
 func (h *taskHandle) AddMessage(ctx context.Context, parts []a2a.Part, optFns ...func(*a2a.MessageOptions)) (string, error) {
@@ -126,6 +133,7 @@ type TaskHandleParams struct {
 	InitialStatus       a2a.TaskStatus // Status at the time of task handle creation
 	AcceptedOutputModes []string       // Accepted output modes for this task
 	IncomingMessage     a2a.Message    // The incoming message that triggered this task
+	HTTPHeaders         http.Header    // HTTP headers from the original request
 }
 
 func (s *AgentService) NewTaskHandle(ctx context.Context, params TaskHandleParams) TaskHandle {
@@ -136,5 +144,6 @@ func (s *AgentService) NewTaskHandle(ctx context.Context, params TaskHandleParam
 		initialStatus:       params.InitialStatus,
 		acceptedOutputModes: params.AcceptedOutputModes,
 		incomingMessage:     params.IncomingMessage,
+		httpHeaders:         params.HTTPHeaders,
 	}
 }

@@ -303,6 +303,7 @@ func (s *AgentService) ProcessJob(ctx context.Context, job *Job) error {
 		InitialStatus:       initialStatus,
 		AcceptedOutputModes: job.AcceptedOutputModes,
 		IncomingMessage:     incomingMessage,
+		HTTPHeaders:         job.HTTPHeaders,
 	})
 	// Create wrapped handle to track status updates made by the Agent
 	wrappedHandle := wrapStatusTracker(h)
@@ -597,6 +598,7 @@ func (s *AgentService) SendMessage(ctx context.Context, params a2a.MessageSendPa
 			TaskID:              taskID,
 			ContextID:           contextID,
 			AcceptedOutputModes: acceptedOutputModes,
+			HTTPHeaders:         transport.GetHTTPHeaders(ctx),
 		}
 
 		if err := s.JobQueue.Enqueue(ctx, jobConfig); err != nil {
@@ -878,6 +880,7 @@ func (s *AgentService) streamTaskEvents(ctx context.Context, contextID, taskID s
 				TaskID:              taskID,
 				ContextID:           contextID,
 				AcceptedOutputModes: acceptedOutputModes,
+				HTTPHeaders:         transport.GetHTTPHeaders(ctx),
 			}
 			if err := s.JobQueue.Enqueue(ctx, jobConfig); err != nil {
 				s.Logger.Error("Failed to enqueue agent job for streaming", "error", err, "taskID", taskID, "contextID", contextID)

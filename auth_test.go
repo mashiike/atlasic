@@ -324,8 +324,8 @@ func TestJWTHelperFunctions(t *testing.T) {
 	token := "test-token"
 
 	ctx := context.Background()
-	ctx = context.WithValue(ctx, jwtContextKey{}, claims)
-	ctx = context.WithValue(ctx, jwtTokenContextKey{}, token)
+	ctx = context.WithValue(ctx, jwtClaimsKey, claims)
+	ctx = context.WithValue(ctx, jwtTokenKey, token)
 
 	// Test GetJWTClaims
 	if retrievedClaims, ok := GetJWTClaims(ctx); !ok {

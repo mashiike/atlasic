@@ -197,26 +197,6 @@ func (r *rpcMethodExtensionHandler) ServeRPC(ctx context.Context, params json.Ra
 	return r.handler(ctx, params)
 }
 
-// Context keys for extension management
-type contextKey string
-
-const (
-	activeExtensionsKey contextKey = "activeExtensions"
-)
-
-// WithActiveExtensions adds active extensions to context
-func WithActiveExtensions(ctx context.Context, extensions []Extension) context.Context {
-	return context.WithValue(ctx, activeExtensionsKey, extensions)
-}
-
-// GetActiveExtensions retrieves active extensions from context
-func GetActiveExtensions(ctx context.Context) []Extension {
-	if extensions, ok := ctx.Value(activeExtensionsKey).([]Extension); ok {
-		return extensions
-	}
-	return nil
-}
-
 // ParseExtensionHeader parses X-A2A-Extensions header
 func ParseExtensionHeader(header string) []string {
 	if header == "" {

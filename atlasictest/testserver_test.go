@@ -3,6 +3,7 @@ package atlasictest
 import (
 	"context"
 	"io"
+	"net/http"
 	"os"
 	"testing"
 	"time"
@@ -213,4 +214,192 @@ func TestNewServer_SubdirectoryCreation(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(testData), n)
 	require.Equal(t, testData, readData)
+}
+
+func TestClientWithHeaders_HTTPHeaders_PassedToAgent(t *testing.T) {
+	// Track headers received by the agent
+	var receivedHeaders http.Header
+
+	// Create an agent that captures headers from TaskHandle
+	agent := atlasic.NewAgent(
+		&atlasic.AgentMetadata{
+			Name:        "HTTP Headers Test Agent",
+			Description: "Agent that captures HTTP headers for testing",
+		},
+		func(ctx context.Context, handle atlasic.TaskHandle) (*a2a.Message, error) {
+			// Capture headers from TaskHandle
+			receivedHeaders = handle.GetHTTPHeaders()
+
+			// Return response
+			return &a2a.Message{
+				MessageID: "agent-response",
+				Role:      a2a.RoleAgent,
+				Parts:     []a2a.Part{a2a.NewTextPart("Headers received and captured")},
+			}, nil
+		},
+	)
+
+	// Create test server
+	server := NewServer(t, agent)
+	defer server.Close()
+
+	// Define test headers with multiple values
+	testHeaders := http.Header{
+		"User-Agent":    []string{"ATLASIC-Test/1.0"},
+		"X-Request-ID":  []string{"req-12345"},
+		"X-Trace-ID":    []string{"trace-67890"},
+		"Accept":        []string{"application/json"},
+		"Authorization": []string{"Bearer test-token"},
+		"Custom-Header": []string{"value1", "value2"}, // Test multi-value header
+	}
+
+	// Create client with custom headers
+	client := server.ClientWithHeaders(testHeaders)
+
+	// Send message
+	ctx := context.Background()
+	params := a2a.MessageSendParams{
+		Message: a2a.NewMessage("test-msg", a2a.RoleUser, []a2a.Part{
+			a2a.NewTextPart("Testing HTTP headers"),
+		}),
+	}
+
+	result, err := client.SendMessage(ctx, params)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Task)
+
+	// Verify that the agent received HTTP headers
+	require.NotNil(t, receivedHeaders, "Agent should receive HTTP headers")
+
+	// Debug: log all received headers
+	t.Logf("All received headers: %v", receivedHeaders)
+
+	// Verify specific headers
+	require.Equal(t, []string{"ATLASIC-Test/1.0"}, receivedHeaders["User-Agent"])
+	require.Equal(t, []string{"req-12345"}, receivedHeaders["X-Request-Id"])
+	require.Equal(t, []string{"trace-67890"}, receivedHeaders["X-Trace-Id"])
+	require.Equal(t, []string{"application/json"}, receivedHeaders["Accept"])
+	require.Equal(t, []string{"Bearer test-token"}, receivedHeaders["Authorization"])
+
+	// Verify multi-value header
+	require.Equal(t, []string{"value1", "value2"}, receivedHeaders["Custom-Header"])
+
+	t.Logf("Agent successfully received %d HTTP headers", len(receivedHeaders))
+}
+
+func TestClientWithHeaders_EmptyHeaders(t *testing.T) {
+	// Track headers received by the agent
+	var receivedHeaders http.Header
+
+	// Create an agent that captures headers from TaskHandle
+	agent := atlasic.NewAgent(
+		&atlasic.AgentMetadata{
+			Name:        "Empty Headers Test Agent",
+			Description: "Agent that tests empty headers scenario",
+		},
+		func(ctx context.Context, handle atlasic.TaskHandle) (*a2a.Message, error) {
+			// Capture headers from TaskHandle
+			receivedHeaders = handle.GetHTTPHeaders()
+
+			// Return response
+			return &a2a.Message{
+				MessageID: "agent-response",
+				Role:      a2a.RoleAgent,
+				Parts:     []a2a.Part{a2a.NewTextPart("No custom headers test")},
+			}, nil
+		},
+	)
+
+	// Create test server
+	server := NewServer(t, agent)
+	defer server.Close()
+
+	// Create client without custom headers (only default HTTP headers)
+	client := server.Client()
+
+	// Send message
+	ctx := context.Background()
+	params := a2a.MessageSendParams{
+		Message: a2a.NewMessage("test-msg", a2a.RoleUser, []a2a.Part{
+			a2a.NewTextPart("Testing without custom headers"),
+		}),
+	}
+
+	result, err := client.SendMessage(ctx, params)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Task)
+
+	// Verify that the agent still receives some headers (default HTTP headers)
+	require.NotNil(t, receivedHeaders, "Agent should receive HTTP headers even if empty custom headers")
+
+	// Should have some default headers like Content-Type, User-Agent from HTTP client
+	require.True(t, len(receivedHeaders) > 0, "Should have at least some default HTTP headers")
+
+	t.Logf("Agent received %d default HTTP headers", len(receivedHeaders))
+}
+
+func TestClientWithHeaders_JobQueuePreservation(t *testing.T) {
+	// Track headers received by the agent
+	var receivedHeaders http.Header
+
+	// Create an agent that captures headers from TaskHandle
+	agent := atlasic.NewAgent(
+		&atlasic.AgentMetadata{
+			Name:        "JobQueue Headers Test Agent",
+			Description: "Agent that tests headers preservation through JobQueue",
+		},
+		func(ctx context.Context, handle atlasic.TaskHandle) (*a2a.Message, error) {
+			// Capture headers from TaskHandle
+			receivedHeaders = handle.GetHTTPHeaders()
+
+			// Return response
+			return &a2a.Message{
+				MessageID: "agent-response",
+				Role:      a2a.RoleAgent,
+				Parts:     []a2a.Part{a2a.NewTextPart("JobQueue headers preserved")},
+			}, nil
+		},
+	)
+
+	// Create test server
+	server := NewServer(t, agent)
+	defer server.Close()
+
+	// Define test headers
+	testHeaders := http.Header{
+		"X-Session-Id":     []string{"session-abc123"},
+		"X-Client-Version": []string{"2.1.0"},
+		"Accept-Language":  []string{"en-US,en;q=0.9"},
+	}
+
+	// Create client with custom headers
+	client := server.ClientWithHeaders(testHeaders)
+
+	// Send message with blocking configuration to ensure JobQueue processing
+	ctx := context.Background()
+	params := a2a.MessageSendParams{
+		Message: a2a.NewMessage("test-msg", a2a.RoleUser, []a2a.Part{
+			a2a.NewTextPart("Testing JobQueue header preservation"),
+		}),
+		Configuration: &a2a.MessageSendConfiguration{
+			Blocking: true, // Still blocking for test simplicity, but goes through JobQueue
+		},
+	}
+
+	result, err := client.SendMessage(ctx, params)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Task)
+
+	// Verify that the agent received HTTP headers through JobQueue
+	require.NotNil(t, receivedHeaders, "Agent should receive HTTP headers through JobQueue")
+
+	// Verify specific headers are preserved through JobQueue processing
+	require.Equal(t, []string{"session-abc123"}, receivedHeaders["X-Session-Id"])
+	require.Equal(t, []string{"2.1.0"}, receivedHeaders["X-Client-Version"])
+	require.Equal(t, []string{"en-US,en;q=0.9"}, receivedHeaders["Accept-Language"])
+
+	t.Logf("JobQueue preserved %d HTTP headers correctly", len(receivedHeaders))
 }

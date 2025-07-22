@@ -12,19 +12,23 @@ import (
 	"github.com/mashiike/atlasic/transport"
 )
 
-// Context keys for JWT authentication
-type jwtContextKey struct{}
-type jwtTokenContextKey struct{}
+// Context keys for the atlasic package
+type contextKey string
+
+const (
+	jwtClaimsKey contextKey = "jwt-claims"
+	jwtTokenKey  contextKey = "jwt-token"
+)
 
 // GetJWTClaims retrieves JWT claims from the request context
 func GetJWTClaims(ctx context.Context) (jwt.MapClaims, bool) {
-	claims, ok := ctx.Value(jwtContextKey{}).(jwt.MapClaims)
+	claims, ok := ctx.Value(jwtClaimsKey).(jwt.MapClaims)
 	return claims, ok
 }
 
 // GetJWTToken retrieves the raw JWT token string from the request context
 func GetJWTToken(ctx context.Context) (string, bool) {
-	token, ok := ctx.Value(jwtTokenContextKey{}).(string)
+	token, ok := ctx.Value(jwtTokenKey).(string)
 	return token, ok
 }
 
@@ -243,8 +247,8 @@ func (j *JWTAuthenticator) Authenticate(ctx context.Context, r *http.Request) (*
 	}
 
 	// Add JWT claims to request context using typed keys
-	newCtx := context.WithValue(r.Context(), jwtContextKey{}, claims)
-	newCtx = context.WithValue(newCtx, jwtTokenContextKey{}, tokenString)
+	newCtx := context.WithValue(r.Context(), jwtClaimsKey, claims)
+	newCtx = context.WithValue(newCtx, jwtTokenKey, tokenString)
 
 	return r.WithContext(newCtx), nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -170,6 +171,12 @@ func (tc *TaskCapture) GetIncomingMessage() a2a.Message {
 	}
 	// Return empty message if no history
 	return a2a.Message{}
+}
+
+func (tc *TaskCapture) GetHTTPHeaders() http.Header {
+	// TaskCapture for testing returns empty headers by default
+	// In real scenarios, this would be populated from the original HTTP request
+	return http.Header{}
 }
 
 // AddMessage implements TaskHandle interface and captures the interaction

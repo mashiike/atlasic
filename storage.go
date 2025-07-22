@@ -31,6 +31,8 @@ var (
 	ErrFileNotFound = errors.New("file not found")
 )
 
+//go:generate go tool mockgen -source=storage.go -destination=mock_storage_test.go -package=atlasic
+
 // Storage provides task persistence and event stream operations (CQRS-based)
 // Implementations should return well-defined errors for consistent handling:
 //   - ErrTaskNotFound: when a requested task does not exist
