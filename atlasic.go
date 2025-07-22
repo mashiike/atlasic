@@ -1043,7 +1043,7 @@ func (s *AgentService) GetAgentCard(ctx context.Context) (*a2a.AgentCard, error)
 		Provider:           meta.Provider,
 	}
 	if card.Version == "" {
-		card.Version = "v0.0.0"
+		card.Version = "v0.1.0"
 	}
 	card.Capabilities.Streaming = !s.DisableStreaming
 	card.Capabilities.PushNotifications = s.pushNotificationsEnabled()
