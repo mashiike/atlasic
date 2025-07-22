@@ -10,7 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.30.2
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.82.0
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.38.8
-	github.com/golang-jwt/jwt/v5 v5.2.2
+	github.com/golang-jwt/jwt/v5 v5.2.3
 	github.com/google/uuid v1.6.0
 	github.com/stretchr/testify v1.10.0
 	go.uber.org/mock v0.5.2
