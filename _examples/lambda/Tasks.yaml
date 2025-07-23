@@ -1,0 +1,66 @@
+version: '3'
+
+tasks:
+  build:
+    internal: true
+    desc: Build bootstrap binary for release.
+    cmds:
+      - GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -tags lambda.norpc -o bootstrap main.go
+
+  diff:
+    desc: Show deployment diff.
+    cmds:
+      - aqua exec  -- lambroll diff --log-level debug --option option.jsonnet
+
+  deploy:
+    desc: Deploy to AWS.
+    prompt: Deploy to AWS environment. Are you sure?
+    deps:
+      - build
+    cmds:
+      - task: diff
+      - aqua exec  -- lambroll deploy --log-level debug --option option.jsonnet --keep-versions 10
+      - task: clean
+
+  deploy-dry-run:
+    desc: Execute dry-run deployment.
+    deps:
+      - build
+    cmds:
+      - task: diff
+      - aqua exec  -- lambroll deploy --dry-run --log-level debug --option option.jsonnet --keep-versions 10
+
+  rollback:
+    desc: Rollback deployment.
+    prompt: Rollback AWS environment. Are you sure?
+    cmds:
+      - aqua exec  -- lambroll rollback --option option.jsonnet
+
+  clean:
+    desc: Remove generated files such as bootstrap.
+    cmds:
+      - rm -f bootstrap
+
+  logs:
+    desc: Show logs.
+    cmds:
+      - aqua exec  -- lambroll logs --follow  --option option.jsonnet
+
+  terraform:init:
+    desc: Initialize terraform.
+    cmds:
+      - |
+        aqua exec  -- terraform init  \
+          -backend-config="bucket=${TF_VAR_tfstate_bucket_name}" \
+          -backend-config="key=atlasic-example/terraform.tfstate" \
+          -backend-config="region=ap-northeast-1"
+  terraform:plan:
+    desc: Show terraform diff.
+    cmds:
+      - aqua exec -- terraform plan
+
+  terraform:apply:
+    desc: Apply terraform
+    cmds:
+      - aqua exec -- terraform apply
+

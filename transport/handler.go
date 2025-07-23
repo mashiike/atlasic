@@ -91,11 +91,16 @@ type Handler struct {
 	extensions     map[string]Extension
 }
 
+const (
+	DefaultRPCPath       = "/"
+	DefaultAgentCardPath = "/.well-known/agent.json"
+)
+
 // NewHandler creates a new A2A JSON-RPC handler with options
 func NewHandler(service AgentService, options ...HandlerOption) *Handler {
 	config := handlerConfig{
-		rpcPath:              "/",
-		agentCardPath:        "/.well-known/agent.json",
+		rpcPath:              DefaultRPCPath,
+		agentCardPath:        DefaultAgentCardPath,
 		agentCardCacheMaxAge: 3600,
 		logger:               slog.Default(), // Default logger
 	}

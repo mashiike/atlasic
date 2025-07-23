@@ -4,6 +4,7 @@ package atlasic
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/fujiwara/ridge"
 	"github.com/mashiike/atlasic/a2a"
 	"github.com/mashiike/atlasic/transport"
 )
@@ -1073,6 +1076,12 @@ type Server struct {
 	// in the form "host:port". If empty, ":80" is used.
 	Addr string
 
+	// RPCPath specifies the base path for the JSON-RPC API.
+	RPCPath string
+
+	// AgentCardPath specifies the path for the agent card endpoint.
+	AgentCardPath string
+
 	// Storage specifies the storage backend for tasks and events.
 	// If nil, a FileSystemStorage with default location is used.
 	Storage Storage
@@ -1093,9 +1102,12 @@ type Server struct {
 	// Extensions are applied to the transport layer.
 	Extensions []transport.Extension
 
+	LambdaOptions []lambda.Option // Options for AWS Lambda integration
+
 	// Internal fields
 	agentService *AgentService
 	httpServer   *http.Server
+	mux          *http.ServeMux // HTTP request multiplexer
 	mu           sync.Mutex
 }
 
@@ -1117,6 +1129,11 @@ func (s *Server) Run() error {
 func (s *Server) RunWithContext(ctx context.Context) error {
 	if err := s.initialize(); err != nil {
 		return err
+	}
+
+	if ridge.OnLambdaRuntime() {
+		// If running on AWS Lambda, use the Lambda handler
+		return s.runOnLambdaRuntime(ctx)
 	}
 
 	// Start the agent service
@@ -1141,6 +1158,79 @@ func (s *Server) RunWithContext(ctx context.Context) error {
 		// Server error
 		return err
 	}
+}
+
+type EventParser interface {
+	// ParseEvent parses an event and returns a JobConfig for it
+	ParseEvent(ctx context.Context, event json.RawMessage) (*Job, error)
+}
+
+type eventParserFunc func(ctx context.Context, event json.RawMessage) (*Job, error)
+
+func (f eventParserFunc) ParseEvent(ctx context.Context, event json.RawMessage) (*Job, error) {
+	return f(ctx, event)
+}
+
+var (
+	ErrSkipEvent = errors.New("skip event") // Special error to skip processing an event
+)
+
+func (s *Server) runOnLambdaRuntime(ctx context.Context) error {
+	// If running on AWS Lambda, use the Lambda handler
+	eventParser, ok := s.JobQueue.(EventParser)
+	if !ok {
+		slog.WarnContext(ctx, "JobQueue does not implement JobQueueWithEventParser, ignore no HTTP event")
+		eventParser = eventParserFunc(func(ctx context.Context, event json.RawMessage) (*Job, error) {
+			slog.DebugContext(ctx, "No event parser available, ignoring HTTP event", "payload", string(event))
+			return nil, ErrSkipEvent
+		})
+	}
+	card, err := s.agentService.GetAgentCard(ctx) // Ensure agent card is initialized
+	if err != nil {
+		return fmt.Errorf("failed to get agent card: %w", err)
+	}
+	opts := append([]lambda.Option{
+		lambda.WithContext(ctx),
+	}, s.LambdaOptions...)
+	lambda.StartWithOptions(
+		func(ctx context.Context, event json.RawMessage) (interface{}, error) {
+			if req, err := ridge.NewRequest(event); err == nil && req.Method != "" && req.URL.Path != "" {
+				if card.Capabilities.Streaming {
+					w := ridge.NewStreamingResponseWriter()
+					go func() {
+						defer func() {
+							if r := recover(); r != nil {
+								slog.ErrorContext(ctx, "Panic in streaming handler", "panic", r)
+							}
+							w.Close()
+						}()
+						s.mux.ServeHTTP(w, req.WithContext(ctx))
+					}()
+					w.Wait()
+					return w.Response(), nil
+				}
+				w := ridge.NewResponseWriter()
+				s.mux.ServeHTTP(w, req.WithContext(ctx))
+				return w.Response(), nil
+			}
+			job, err := eventParser.ParseEvent(ctx, event)
+			if err != nil {
+				if errors.Is(err, ErrSkipEvent) {
+					slog.DebugContext(ctx, "Skipping event processing", "error", err)
+					return json.RawMessage(`"skipped"`), nil
+				}
+				slog.ErrorContext(ctx, "Failed to parse event", "error", err, "payload", string(event))
+				return nil, fmt.Errorf("failed to parse event: %w", err)
+			}
+			if err := s.agentService.ProcessJob(ctx, job); err != nil {
+				slog.ErrorContext(ctx, "Failed to process job", "error", err)
+				return nil, fmt.Errorf("failed to process job: %w", err)
+			}
+			return json.RawMessage(`"job processed"`), nil
+		},
+		opts...,
+	)
+	return nil
 }
 
 // Shutdown gracefully shuts down the server without interrupting any
@@ -1211,21 +1301,34 @@ func (s *Server) initialize() error {
 		s.agentService = NewAgentService(s.Storage, s.Agent)
 		s.agentService.JobQueue = s.JobQueue
 	}
-
-	// Create HTTP server if not already initialized
-	if s.httpServer == nil {
-		var handlerOptions []transport.HandlerOption
+	if s.RPCPath == "" {
+		s.RPCPath = transport.DefaultRPCPath
+	}
+	if s.AgentCardPath == "" {
+		s.AgentCardPath = transport.DefaultAgentCardPath
+	}
+	if s.mux == nil {
+		handlerOptions := []transport.HandlerOption{
+			transport.WithRPCPath(s.RPCPath),
+			transport.WithAgentCardPath(s.AgentCardPath),
+		}
 		if s.Authenticator != nil {
 			handlerOptions = append(handlerOptions, transport.WithAuthenticator(s.Authenticator))
 		}
 		if len(s.Extensions) > 0 {
 			handlerOptions = append(handlerOptions, transport.WithExtensions(s.Extensions...))
 		}
-
 		handler := transport.NewHandler(s.agentService, handlerOptions...)
+		s.mux = http.NewServeMux()
+		s.mux.Handle(s.RPCPath, handler)
+		s.mux.Handle(s.AgentCardPath, handler)
+	}
+
+	// Create HTTP server if not already initialized
+	if s.httpServer == nil {
 		s.httpServer = &http.Server{
 			Addr:              s.Addr,
-			Handler:           handler,
+			Handler:           s.mux,
 			ReadHeaderTimeout: 30 * time.Second,
 		}
 	}

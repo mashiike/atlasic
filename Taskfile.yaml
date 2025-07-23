@@ -130,3 +130,8 @@ tasks:
       - rm -rf dist/
       - go clean -cache
       - go clean -testcache
+
+includes:
+  examples:lambda:
+    taskfile: ./_examples/lambda/Tasks.yaml
+    dir: ./_examples/lambda/

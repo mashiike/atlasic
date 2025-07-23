@@ -2,9 +2,11 @@ package awsadp
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
@@ -209,4 +211,206 @@ func TestSQSJobQueue_ConfigValidation(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "either QueueURL or QueueName must be specified")
 	})
+}
+
+func TestSQSJobQueue_ParseEvent(t *testing.T) {
+	client := createElasticMQClient(t)
+	randomPrefix, err := generateRandomPrefix()
+	require.NoError(t, err)
+	queueURL := createTestQueue(t, client, "test-parse-event-"+randomPrefix)
+
+	jobQueue, err := NewSQSJobQueue(SQSJobQueueConfig{
+		Client:   client,
+		QueueURL: queueURL,
+	})
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	t.Run("ValidSQSEvent", func(t *testing.T) {
+		// Create test job config
+		jobConfig := atlasic.JobConfig{
+			TaskID:              "task-123",
+			ContextID:           "context-456",
+			AcceptedOutputModes: []string{"text/plain"},
+			IncomingMessageID:   "msg-789",
+		}
+
+		// Create SQS event
+		sqsEvent := events.SQSEvent{
+			Records: []events.SQSMessage{
+				{
+					MessageId:      "message-123",
+					ReceiptHandle:  "receipt-handle-123",
+					Body:           mustMarshalJSON(t, jobConfig),
+					EventSource:    "aws:sqs",
+					EventSourceARN: "arn:aws:sqs:us-east-1:123456789012:test-queue",
+				},
+			},
+		}
+
+		eventData := mustMarshalJSON(t, sqsEvent)
+
+		// Parse event
+		job, err := jobQueue.ParseEvent(ctx, json.RawMessage(eventData))
+		require.NoError(t, err)
+		assert.NotNil(t, job)
+
+		// Verify job properties
+		assert.Equal(t, "task-123", job.TaskID)
+		assert.Equal(t, "context-456", job.ContextID)
+		assert.Equal(t, []string{"text/plain"}, job.AcceptedOutputModes)
+		assert.Equal(t, "msg-789", job.IncomingMessageID)
+
+		// Verify functions are not nil
+		assert.NotNil(t, job.ExtendTimeoutFunc)
+		assert.NotNil(t, job.CompleteFunc)
+		assert.NotNil(t, job.FailFunc)
+
+		// Test ExtendTimeoutFunc (note: will fail with mock receipt handle, but function should exist)
+		err = job.ExtendTimeoutFunc(ctx, 30*time.Second)
+		// In Lambda environment with real receipt handle this would work, but in test it fails
+		assert.Error(t, err) // Expected to fail with invalid receipt handle
+	})
+
+	t.Run("NonSQSEvent", func(t *testing.T) {
+		// Create non-SQS event
+		event := map[string]interface{}{
+			"Records": []map[string]interface{}{
+				{
+					"eventSource": "aws:s3",
+					"eventName":   "ObjectCreated:Put",
+				},
+			},
+		}
+
+		eventData := mustMarshalJSON(t, event)
+
+		// Parse event
+		job, err := jobQueue.ParseEvent(ctx, json.RawMessage(eventData))
+		assert.ErrorIs(t, err, atlasic.ErrSkipEvent)
+		assert.Nil(t, job)
+	})
+
+	t.Run("EmptyEvent", func(t *testing.T) {
+		// Create empty event
+		event := events.SQSEvent{
+			Records: []events.SQSMessage{},
+		}
+
+		eventData := mustMarshalJSON(t, event)
+
+		// Parse event
+		job, err := jobQueue.ParseEvent(ctx, json.RawMessage(eventData))
+		assert.ErrorIs(t, err, atlasic.ErrSkipEvent)
+		assert.Nil(t, job)
+	})
+
+	t.Run("MultipleSQSMessages", func(t *testing.T) {
+		// Create job configs
+		jobConfig1 := atlasic.JobConfig{TaskID: "task-1"}
+		jobConfig2 := atlasic.JobConfig{TaskID: "task-2"}
+
+		// Create SQS event with multiple messages
+		sqsEvent := events.SQSEvent{
+			Records: []events.SQSMessage{
+				{
+					MessageId:     "message-1",
+					ReceiptHandle: "receipt-handle-1",
+					Body:          mustMarshalJSON(t, jobConfig1),
+					EventSource:   "aws:sqs",
+				},
+				{
+					MessageId:     "message-2",
+					ReceiptHandle: "receipt-handle-2",
+					Body:          mustMarshalJSON(t, jobConfig2),
+					EventSource:   "aws:sqs",
+				},
+			},
+		}
+
+		eventData := mustMarshalJSON(t, sqsEvent)
+
+		// Parse event
+		job, err := jobQueue.ParseEvent(ctx, json.RawMessage(eventData))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "multiple SQS messages found in event")
+		assert.Nil(t, job)
+	})
+
+	t.Run("InvalidJobConfig", func(t *testing.T) {
+		// Create SQS event with invalid job config
+		sqsEvent := events.SQSEvent{
+			Records: []events.SQSMessage{
+				{
+					MessageId:     "message-123",
+					ReceiptHandle: "receipt-handle-123",
+					Body:          "invalid json",
+					EventSource:   "aws:sqs",
+				},
+			},
+		}
+
+		eventData := mustMarshalJSON(t, sqsEvent)
+
+		// Parse event
+		job, err := jobQueue.ParseEvent(ctx, json.RawMessage(eventData))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to parse job config from SQS message")
+		assert.Nil(t, job)
+	})
+
+	t.Run("MixedEventSources", func(t *testing.T) {
+		// Create job config
+		jobConfig := atlasic.JobConfig{
+			TaskID:    "task-mixed",
+			ContextID: "context-mixed",
+		}
+
+		// Create mixed event (SQS + S3)
+		sqsEvent := events.SQSEvent{
+			Records: []events.SQSMessage{
+				{
+					MessageId:     "message-s3",
+					ReceiptHandle: "receipt-handle-s3",
+					Body:          "s3 event body",
+					EventSource:   "aws:s3", // Non-SQS event
+				},
+				{
+					MessageId:     "message-sqs",
+					ReceiptHandle: "receipt-handle-sqs",
+					Body:          mustMarshalJSON(t, jobConfig),
+					EventSource:   "aws:sqs", // Valid SQS event
+				},
+			},
+		}
+
+		eventData := mustMarshalJSON(t, sqsEvent)
+
+		// Parse event (should process only SQS message)
+		job, err := jobQueue.ParseEvent(ctx, json.RawMessage(eventData))
+		require.NoError(t, err)
+		assert.NotNil(t, job)
+		assert.Equal(t, "task-mixed", job.TaskID)
+		assert.Equal(t, "context-mixed", job.ContextID)
+	})
+
+	t.Run("InvalidEventFormat", func(t *testing.T) {
+		// Create invalid event format
+		eventData := json.RawMessage(`{"invalid": "format"}`)
+
+		// Parse event
+		job, err := jobQueue.ParseEvent(ctx, eventData)
+		// The current implementation returns ErrSkipEvent for unrecognizable events
+		assert.ErrorIs(t, err, atlasic.ErrSkipEvent)
+		assert.Nil(t, job)
+	})
+}
+
+// Helper function to marshal JSON with error handling
+func mustMarshalJSON(t *testing.T, v interface{}) string {
+	t.Helper()
+	data, err := json.Marshal(v)
+	require.NoError(t, err)
+	return string(data)
 }
