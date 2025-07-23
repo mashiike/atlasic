@@ -1105,18 +1105,31 @@ type Server struct {
 	LambdaOptions []lambda.Option // Options for AWS Lambda integration
 
 	// Internal fields
-	agentService *AgentService
-	httpServer   *http.Server
-	mux          *http.ServeMux // HTTP request multiplexer
-	mu           sync.Mutex
+	agentService   *AgentService
+	httpServer     *http.Server
+	mux            *http.ServeMux                    // HTTP request multiplexer
+	customHandlers map[string]http.Handler           // Custom handlers stored before initialization
+	middlewares    []func(http.Handler) http.Handler // HTTP middlewares applied to all requests
+	mu             sync.Mutex
 }
 
-// Use adds extensions to the server.
+// AddExtension adds A2A protocol extensions to the server.
 // Extensions are applied to the transport layer for request/response processing.
-func (s *Server) Use(extensions ...transport.Extension) {
+func (s *Server) AddExtension(extensions ...transport.Extension) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.Extensions == nil {
+		s.Extensions = make([]transport.Extension, 0)
+	}
 	s.Extensions = append(s.Extensions, extensions...)
+}
+
+// Use adds HTTP middlewares to the server.
+// Middlewares are applied to all HTTP requests in the order they are added.
+func (s *Server) Use(middlewares ...func(http.Handler) http.Handler) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.middlewares = append(s.middlewares, middlewares...)
 }
 
 // Run starts the server and blocks until the server shuts down.
@@ -1322,18 +1335,79 @@ func (s *Server) initialize() error {
 		s.mux = http.NewServeMux()
 		s.mux.Handle(s.RPCPath, handler)
 		s.mux.Handle(s.AgentCardPath, handler)
+
+		// Register custom handlers
+		for pattern, customHandler := range s.customHandlers {
+			s.mux.Handle(pattern, customHandler)
+		}
+		s.customHandlers = nil // Clear to free memory
 	}
 
 	// Create HTTP server if not already initialized
 	if s.httpServer == nil {
+		// Apply middleware chain to the mux
+		handler := s.applyMiddleware(s.mux)
+
 		s.httpServer = &http.Server{
 			Addr:              s.Addr,
-			Handler:           s.mux,
+			Handler:           handler,
 			ReadHeaderTimeout: 30 * time.Second,
 		}
 	}
 
 	return nil
+}
+
+// isProtectedPattern checks if the pattern conflicts with A2A endpoints
+func (s *Server) isProtectedPattern(pattern string) bool {
+	// Check against current RPC and AgentCard paths
+	rpcPath := s.RPCPath
+	if rpcPath == "" {
+		rpcPath = transport.DefaultRPCPath
+	}
+
+	agentCardPath := s.AgentCardPath
+	if agentCardPath == "" {
+		agentCardPath = transport.DefaultAgentCardPath
+	}
+
+	return pattern == rpcPath || pattern == agentCardPath
+}
+
+// Handle registers a handler for the given pattern.
+// It panics if the pattern is already registered or conflicts with A2A endpoints.
+func (s *Server) Handle(pattern string, handler http.Handler) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Check for A2A endpoint conflicts
+	if s.isProtectedPattern(pattern) {
+		panic(fmt.Sprintf("pattern %s conflicts with A2A endpoints", pattern))
+	}
+
+	// If mux is already initialized, register directly
+	if s.mux != nil {
+		s.mux.Handle(pattern, handler)
+		return
+	}
+
+	// Store for later registration during initialization
+	if s.customHandlers == nil {
+		s.customHandlers = make(map[string]http.Handler)
+	}
+
+	// Check for duplicate patterns in custom handlers
+	if _, exists := s.customHandlers[pattern]; exists {
+		panic(fmt.Sprintf("http: multiple registrations for %s", pattern))
+	}
+
+	s.customHandlers[pattern] = handler
+}
+
+// HandleFunc registers a handler function for the given pattern.
+// It panics if the pattern is already registered or conflicts with A2A endpoints.
+func (s *Server) HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request)) {
+	s.Handle(pattern, http.HandlerFunc(handler))
 }
 
 func (s *AgentService) DeleteTaskPushNotificationConfig(ctx context.Context, params a2a.DeleteTaskPushNotificationConfigParams) error {
@@ -1351,4 +1425,14 @@ func (s *AgentService) DeleteTaskPushNotificationConfig(ctx context.Context, par
 	}
 
 	return nil
+}
+
+// applyMiddleware applies all registered middlewares to the given handler
+func (s *Server) applyMiddleware(handler http.Handler) http.Handler {
+	// Apply middlewares in registration order (first registered wraps outermost)
+	result := handler
+	for i := len(s.middlewares) - 1; i >= 0; i-- {
+		result = s.middlewares[i](result)
+	}
+	return result
 }

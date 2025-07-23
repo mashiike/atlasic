@@ -1245,5 +1245,225 @@ func TestHandler_RegularErrorToInternalError(t *testing.T) {
 	require.NotNil(t, response.Error)
 	assert.Equal(t, a2a.ErrorCodeInternalError, response.Error.Code)
 	assert.Equal(t, a2a.ErrorCodeText(a2a.ErrorCodeInternalError), response.Error.Message)
-	assert.Equal(t, "this is a regular Go error", response.Error.Data)
+	assert.Nil(t, response.Error.Data)
+}
+
+func TestHandler_NewDefaultInternalErrorBehavior(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockService := NewMockAgentService(ctrl)
+
+	// Create handler without custom internal error builder (uses default behavior)
+	handler := NewHandler(mockService)
+
+	// Register a method that returns a regular error
+	handler.RegisterMethod("default/error-test", func(ctx context.Context, params json.RawMessage) (interface{}, error) {
+		return nil, fmt.Errorf("test error for default behavior")
+	})
+
+	// Create request
+	jsonrpcReq := a2a.JSONRPCRequest{
+		JSONRpc: "2.0",
+		Method:  "default/error-test",
+		Params:  map[string]interface{}{},
+		ID:      "default-error-1",
+	}
+
+	reqBody, err := json.Marshal(jsonrpcReq)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(string(reqBody)))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, "application/json", recorder.Header().Get("Content-Type"))
+
+	var response a2a.JSONRPCResponse
+	err = json.Unmarshal(recorder.Body.Bytes(), &response)
+	require.NoError(t, err)
+
+	assert.Equal(t, "default-error-1", response.ID)
+	assert.Nil(t, response.Result)
+	require.NotNil(t, response.Error)
+	assert.Equal(t, a2a.ErrorCodeInternalError, response.Error.Code)
+	assert.Equal(t, a2a.ErrorCodeText(a2a.ErrorCodeInternalError), response.Error.Message)
+
+	// Check that default behavior has data=nil
+	assert.Nil(t, response.Error.Data)
+}
+
+func TestHandler_NewCustomInternalErrorBuilder(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockService := NewMockAgentService(ctrl)
+
+	// Create handler with custom internal error builder
+	handler := NewHandler(mockService, WithInternalErrorBuilder(func(ctx context.Context, id interface{}, originalError error) (int, string, interface{}) {
+		return a2a.ErrorCodeInternalError, "Custom Internal Error", map[string]interface{}{
+			"message":  "Custom error processing",
+			"original": originalError.Error(),
+			"type":     "internal_error",
+		}
+	}))
+
+	// Register a method that returns a regular error
+	handler.RegisterMethod("custom/error-test", func(ctx context.Context, params json.RawMessage) (interface{}, error) {
+		return nil, fmt.Errorf("test error for custom builder")
+	})
+
+	// Create request
+	jsonrpcReq := a2a.JSONRPCRequest{
+		JSONRpc: "2.0",
+		Method:  "custom/error-test",
+		Params:  map[string]interface{}{},
+		ID:      "custom-error-1",
+	}
+
+	reqBody, err := json.Marshal(jsonrpcReq)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(string(reqBody)))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, "application/json", recorder.Header().Get("Content-Type"))
+
+	var response a2a.JSONRPCResponse
+	err = json.Unmarshal(recorder.Body.Bytes(), &response)
+	require.NoError(t, err)
+
+	assert.Equal(t, "custom-error-1", response.ID)
+	assert.Nil(t, response.Result)
+	require.NotNil(t, response.Error)
+	assert.Equal(t, a2a.ErrorCodeInternalError, response.Error.Code)
+	assert.Equal(t, "Custom Internal Error", response.Error.Message)
+
+	// Check that custom error builder was used
+	dataMap, ok := response.Error.Data.(map[string]interface{})
+	require.True(t, ok, "Expected data to be a map")
+	assert.Equal(t, "Custom error processing", dataMap["message"])
+	assert.Equal(t, "test error for custom builder", dataMap["original"])
+	assert.Equal(t, "internal_error", dataMap["type"])
+}
+
+func TestHandler_NewCustomInternalErrorBuilder_SSE(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockService := NewMockAgentService(ctrl)
+
+	// Create handler with custom internal error builder
+	handler := NewHandler(mockService, WithInternalErrorBuilder(func(ctx context.Context, id interface{}, originalError error) (int, string, interface{}) {
+		return a2a.ErrorCodeInternalError, "SSE Internal Error", map[string]interface{}{
+			"error_code": "SSE_INTERNAL_ERROR",
+			"details":    originalError.Error(),
+		}
+	}))
+
+	// Register a streaming method that returns an error
+	handler.methodRegistry["custom/sse-error"] = methodDescriptor{
+		method:    "custom/sse-error",
+		mediaType: "text/event-stream",
+		handler: func(ctx context.Context, params json.RawMessage, w http.ResponseWriter, id interface{}) error {
+			return fmt.Errorf("SSE error for testing")
+		},
+	}
+
+	// Create request
+	jsonrpcReq := a2a.JSONRPCRequest{
+		JSONRpc: "2.0",
+		Method:  "custom/sse-error",
+		Params:  map[string]interface{}{},
+		ID:      "sse-error-1",
+	}
+
+	reqBody, err := json.Marshal(jsonrpcReq)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(string(reqBody)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, "text/event-stream", recorder.Header().Get("Content-Type"))
+
+	// Parse SSE response
+	responseBody := recorder.Body.String()
+	assert.True(t, strings.HasPrefix(responseBody, "data: "))
+
+	// Extract JSON from SSE format
+	jsonData := strings.TrimPrefix(responseBody, "data: ")
+	jsonData = strings.TrimSuffix(jsonData, "\n\n")
+
+	var response a2a.JSONRPCResponse
+	err = json.Unmarshal([]byte(jsonData), &response)
+	require.NoError(t, err)
+
+	assert.Equal(t, "sse-error-1", response.ID)
+	assert.Nil(t, response.Result)
+	require.NotNil(t, response.Error)
+	assert.Equal(t, a2a.ErrorCodeInternalError, response.Error.Code)
+	assert.Equal(t, "SSE Internal Error", response.Error.Message)
+
+	// Check that custom error builder was used for SSE
+	dataMap, ok := response.Error.Data.(map[string]interface{})
+	require.True(t, ok, "Expected data to be a map")
+	assert.Equal(t, "SSE_INTERNAL_ERROR", dataMap["error_code"])
+	assert.Equal(t, "SSE error for testing", dataMap["details"])
+}
+
+func TestHandler_NewBuildInternalError_DefaultBehavior(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockService := NewMockAgentService(ctrl)
+	handler := NewHandler(mockService) // No custom builder
+
+	ctx := context.Background()
+	originalError := fmt.Errorf("test error message")
+
+	code, message, data := handler.buildInternalError(ctx, "test-id", originalError)
+
+	assert.Equal(t, a2a.ErrorCodeInternalError, code)
+	assert.Equal(t, a2a.ErrorCodeText(a2a.ErrorCodeInternalError), message)
+	assert.Nil(t, data)
+}
+
+func TestHandler_NewBuildInternalError_CustomBuilder(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockService := NewMockAgentService(ctrl)
+	handler := NewHandler(mockService, WithInternalErrorBuilder(func(ctx context.Context, id interface{}, originalError error) (int, string, interface{}) {
+		return 5000, "Custom Error Message", map[string]interface{}{
+			"custom":    true,
+			"message":   originalError.Error(),
+			"timestamp": "2024-01-01T00:00:00Z",
+		}
+	}))
+
+	ctx := context.Background()
+	originalError := fmt.Errorf("custom test error")
+
+	code, message, data := handler.buildInternalError(ctx, "custom-id", originalError)
+
+	assert.Equal(t, 5000, code)
+	assert.Equal(t, "Custom Error Message", message)
+
+	dataMap, ok := data.(map[string]interface{})
+	require.True(t, ok, "Expected data to be a map")
+	assert.Equal(t, true, dataMap["custom"])
+	assert.Equal(t, "custom test error", dataMap["message"])
+	assert.Equal(t, "2024-01-01T00:00:00Z", dataMap["timestamp"])
 }

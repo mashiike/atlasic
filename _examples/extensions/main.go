@@ -176,8 +176,8 @@ func main() {
 		Agent: agent,
 	}
 
-	// Add extensions using the Use method
-	server.Use(dataOnlyExt, methodExt, profileExt)
+	// Add extensions using the AddExtension method
+	server.AddExtension(dataOnlyExt, methodExt, profileExt)
 
 	fmt.Println("🎯 Demo Server Configuration:")
 	fmt.Println("  • DataOnly Extension: Custom capabilities in AgentCard")
