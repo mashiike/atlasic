@@ -4,12 +4,14 @@ go 1.24.4
 
 require (
 	github.com/Songmu/flextime v0.1.0
+	github.com/aws/aws-lambda-go v1.49.0
 	github.com/aws/aws-sdk-go-v2 v1.36.6
 	github.com/aws/aws-sdk-go-v2/config v1.29.18
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.71
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.31.1
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.84.1
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.38.9
+	github.com/fujiwara/ridge v0.13.0
 	github.com/golang-jwt/jwt/v5 v5.2.3
 	github.com/google/uuid v1.6.0
 	github.com/stretchr/testify v1.10.0
@@ -32,6 +34,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.34.1 // indirect
 	github.com/aws/smithy-go v1.22.4 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/pires/go-proxyproto v0.8.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	golang.org/x/mod v0.18.0 // indirect
 	golang.org/x/sync v0.7.0 // indirect

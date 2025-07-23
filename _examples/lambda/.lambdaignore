@@ -1,0 +1,14 @@
+.terraform/*
+*.go
+*.tf
+function.jsonnet
+option.jsonnet
+README.md
+aqua.yaml
+.gitignore
+.env.example
+Tasks.yaml
+.terraform.lock.hcl
+*.zip
+.lambdaignore
+payloads/*

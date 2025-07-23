@@ -1,0 +1,4 @@
+bootstrap
+.terraform*
+*.zip
+.terraform-version

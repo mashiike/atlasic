@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/mashiike/atlasic"
@@ -17,7 +18,7 @@ import (
 type SQSJobQueueConfig struct {
 	Client    *sqs.Client
 	QueueURL  string
-	QueueName string       // QueueURL未指定時の自動生成用（Optional）
+	QueueName string       // For automatic generation when QueueName is not specified (Optional)
 	Logger    *slog.Logger // Optional logger, defaults to slog.Default()
 }
 
@@ -39,7 +40,7 @@ func NewSQSJobQueue(config SQSJobQueueConfig) (*SQSJobQueue, error) {
 		return nil, errors.New("either QueueURL or QueueName must be specified")
 	}
 
-	// QueueName指定時はGetQueueUrlで取得
+	// Get QueueURL using GetQueueUrl when QueueName is specified
 	if queueURL == "" {
 		result, err := config.Client.GetQueueUrl(context.Background(), &sqs.GetQueueUrlInput{
 			QueueName: aws.String(config.QueueName),
@@ -186,4 +187,66 @@ func (q *SQSJobQueue) deleteMessage(ctx context.Context, receiptHandle string) e
 		return fmt.Errorf("failed to delete message: %w", err)
 	}
 	return nil
+}
+
+// ParseEvent implements EventParser interface for AWS Lambda integration
+// This allows SQS messages to be processed directly from Lambda events
+func (q *SQSJobQueue) ParseEvent(ctx context.Context, event json.RawMessage) (*atlasic.Job, error) {
+	// Try to parse as SQS event
+	var sqsEvent events.SQSEvent
+
+	if err := json.Unmarshal(event, &sqsEvent); err != nil {
+		return nil, fmt.Errorf("failed to parse SQS event: %w", err)
+	}
+
+	targetEvents := make([]events.SQSMessage, 0, len(sqsEvent.Records))
+	for _, record := range sqsEvent.Records {
+		if record.EventSource != "aws:sqs" {
+			q.logger.Warn("Skipping non-SQS event", "eventSource", record.EventSource)
+			continue
+		}
+		targetEvents = append(targetEvents, record)
+	}
+	if len(targetEvents) == 0 {
+		return nil, atlasic.ErrSkipEvent
+	}
+
+	if len(targetEvents) > 1 {
+		return nil, fmt.Errorf("multiple SQS messages found in event, expected only one: %d messages", len(targetEvents))
+	}
+
+	// Parse job config from SQS message body
+	var jobConfig atlasic.JobConfig
+	if err := json.Unmarshal([]byte(targetEvents[0].Body), &jobConfig); err != nil {
+		return nil, fmt.Errorf("failed to parse job config from SQS message: %w", err)
+	}
+
+	// Create job - Lambda handles message deletion automatically
+	job := &atlasic.Job{
+		TaskID:              jobConfig.TaskID,
+		ContextID:           jobConfig.ContextID,
+		AcceptedOutputModes: jobConfig.AcceptedOutputModes,
+		IncomingMessageID:   jobConfig.IncomingMessageID,
+		ExtendTimeoutFunc: func(ctx context.Context, duration time.Duration) error {
+			_, err := q.client.ChangeMessageVisibility(ctx, &sqs.ChangeMessageVisibilityInput{
+				QueueUrl:          aws.String(q.queueURL),
+				ReceiptHandle:     aws.String(targetEvents[0].ReceiptHandle),
+				VisibilityTimeout: int32(duration.Seconds()),
+			})
+			if err != nil {
+				return fmt.Errorf("failed to extend visibility timeout: %w", err)
+			}
+			return nil
+		},
+		CompleteFunc: func() error {
+			// Lambda deletes message automatically on success
+			return nil
+		},
+		FailFunc: func() error {
+			// Lambda handles retry automatically on error
+			return nil
+		},
+	}
+
+	return job, nil
 }
