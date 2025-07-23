@@ -6,9 +6,11 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 
 	"github.com/mashiike/atlasic"
 	"github.com/mashiike/atlasic/a2a"
@@ -117,7 +119,38 @@ func main() {
 		Agent: agent,
 	}
 
-	slog.Info("Starting server", "addr", server.Addr)
+	// Add custom endpoints using Handle/HandleFunc
+	server.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok","service":"atlasic-agent"}`))
+	})
+
+	server.HandleFunc("/version", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"version":"1.0.0","agent":"Local Agent"}`))
+	})
+
+	// Add HTTP middlewares using Use
+	server.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+			next.ServeHTTP(w, r)
+			duration := time.Since(start)
+			slog.Info("HTTP Request", "method", r.Method, "path", r.URL.Path, "duration", duration)
+		})
+	})
+
+	server.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Server", "atlasic-agent")
+			next.ServeHTTP(w, r)
+		})
+	})
+
+	slog.Info("Starting server with custom endpoints", "addr", server.Addr,
+		"endpoints", []string{"/health", "/version", "/", "/.well-known/agent.json"})
 	if err := server.RunWithContext(ctx); err != nil {
 		slog.Error("Server error", "error", err)
 	}

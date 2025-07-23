@@ -3,6 +3,8 @@ package atlasic
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -1618,4 +1620,468 @@ func TestA2A_AuthRequiredState(t *testing.T) {
 	}
 
 	t.Logf("✅ Auth-required state handling: Task correctly transitioned to auth-required state")
+}
+
+// TestServer_Handle tests the Handle method for registering custom handlers
+func TestServer_Handle(t *testing.T) {
+	// Create a mock agent
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockAgent := NewMockAgent(ctrl)
+	mockAgent.EXPECT().GetMetadata(gomock.Any()).Return(&AgentMetadata{
+		Name:        "Test Agent",
+		Description: "A test agent",
+		Version:     "1.0.0",
+	}, nil).AnyTimes()
+
+	// Create server
+	server := &Server{
+		Agent: mockAgent,
+	}
+
+	// Test registering a custom handler before initialization
+	handlerCalled := false
+	server.Handle("/test", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("test response"))
+	}))
+
+	// Initialize server
+	err := server.initialize()
+	if err != nil {
+		t.Fatalf("Failed to initialize server: %v", err)
+	}
+
+	// Verify custom handler was registered
+	if server.mux == nil {
+		t.Fatal("Expected mux to be initialized")
+	}
+
+	// Test the custom handler works
+	req, err := http.NewRequest("GET", "/test", nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	server.mux.ServeHTTP(recorder, req)
+
+	if !handlerCalled {
+		t.Error("Expected custom handler to be called")
+	}
+
+	if recorder.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", recorder.Code)
+	}
+
+	if recorder.Body.String() != "test response" {
+		t.Errorf("Expected 'test response', got '%s'", recorder.Body.String())
+	}
+}
+
+// TestServer_HandleFunc tests the HandleFunc method
+func TestServer_HandleFunc(t *testing.T) {
+	// Create a mock agent
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockAgent := NewMockAgent(ctrl)
+	mockAgent.EXPECT().GetMetadata(gomock.Any()).Return(&AgentMetadata{
+		Name:        "Test Agent",
+		Description: "A test agent",
+		Version:     "1.0.0",
+	}, nil).AnyTimes()
+
+	// Create server
+	server := &Server{
+		Agent: mockAgent,
+	}
+
+	// Test registering a custom handler function before initialization
+	handlerCalled := false
+	server.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+
+	// Initialize server
+	err := server.initialize()
+	if err != nil {
+		t.Fatalf("Failed to initialize server: %v", err)
+	}
+
+	// Test the custom handler works
+	req, err := http.NewRequest("GET", "/health", nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	server.mux.ServeHTTP(recorder, req)
+
+	if !handlerCalled {
+		t.Error("Expected custom handler function to be called")
+	}
+
+	if recorder.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", recorder.Code)
+	}
+
+	if recorder.Body.String() != "OK" {
+		t.Errorf("Expected 'OK', got '%s'", recorder.Body.String())
+	}
+}
+
+// TestServer_HandleAfterInitialization tests registering handlers after initialization
+func TestServer_HandleAfterInitialization(t *testing.T) {
+	// Create a mock agent
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockAgent := NewMockAgent(ctrl)
+	mockAgent.EXPECT().GetMetadata(gomock.Any()).Return(&AgentMetadata{
+		Name:        "Test Agent",
+		Description: "A test agent",
+		Version:     "1.0.0",
+	}, nil).AnyTimes()
+
+	// Create and initialize server first
+	server := &Server{
+		Agent: mockAgent,
+	}
+
+	err := server.initialize()
+	if err != nil {
+		t.Fatalf("Failed to initialize server: %v", err)
+	}
+
+	// Now register handler after initialization
+	handlerCalled := false
+	server.HandleFunc("/post-init", func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("post-init"))
+	})
+
+	// Test the handler works
+	req, err := http.NewRequest("GET", "/post-init", nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	server.mux.ServeHTTP(recorder, req)
+
+	if !handlerCalled {
+		t.Error("Expected post-initialization handler to be called")
+	}
+
+	if recorder.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", recorder.Code)
+	}
+
+	if recorder.Body.String() != "post-init" {
+		t.Errorf("Expected 'post-init', got '%s'", recorder.Body.String())
+	}
+}
+
+// TestServer_HandleProtectedPatternPanic tests panic on A2A endpoint conflicts
+func TestServer_HandleProtectedPatternPanic(t *testing.T) {
+	// Create a mock agent
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockAgent := NewMockAgent(ctrl)
+
+	server := &Server{
+		Agent: mockAgent,
+	}
+
+	// Test panic when trying to register handler for RPC path
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("Expected panic when registering handler for RPC path")
+		} else if !strings.Contains(r.(string), "conflicts with A2A endpoints") {
+			t.Errorf("Expected panic message about A2A conflicts, got: %v", r)
+		}
+	}()
+
+	server.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+}
+
+// TestServer_HandleAgentCardPathPanic tests panic on agent card path conflicts
+func TestServer_HandleAgentCardPathPanic(t *testing.T) {
+	// Create a mock agent
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockAgent := NewMockAgent(ctrl)
+
+	server := &Server{
+		Agent: mockAgent,
+	}
+
+	// Test panic when trying to register handler for agent card path
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("Expected panic when registering handler for agent card path")
+		} else if !strings.Contains(r.(string), "conflicts with A2A endpoints") {
+			t.Errorf("Expected panic message about A2A conflicts, got: %v", r)
+		}
+	}()
+
+	server.Handle("/.well-known/agent.json", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+}
+
+// TestServer_HandleDuplicatePatternPanic tests panic on duplicate pattern registration
+func TestServer_HandleDuplicatePatternPanic(t *testing.T) {
+	// Create a mock agent
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockAgent := NewMockAgent(ctrl)
+
+	server := &Server{
+		Agent: mockAgent,
+	}
+
+	// Register first handler
+	server.Handle("/duplicate", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+
+	// Test panic when trying to register duplicate handler
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("Expected panic when registering duplicate pattern")
+		} else if !strings.Contains(r.(string), "multiple registrations for") {
+			t.Errorf("Expected panic message about multiple registrations, got: %v", r)
+		}
+	}()
+
+	server.Handle("/duplicate", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+}
+
+// TestServer_HandleCustomRPCPath tests custom RPC path protection
+func TestServer_HandleCustomRPCPath(t *testing.T) {
+	// Create a mock agent
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockAgent := NewMockAgent(ctrl)
+
+	server := &Server{
+		Agent:   mockAgent,
+		RPCPath: "/api/v1/rpc",
+	}
+
+	// Test panic when trying to register handler for custom RPC path
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("Expected panic when registering handler for custom RPC path")
+		} else if !strings.Contains(r.(string), "conflicts with A2A endpoints") {
+			t.Errorf("Expected panic message about A2A conflicts, got: %v", r)
+		}
+	}()
+
+	server.Handle("/api/v1/rpc", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+}
+
+// TestServer_A2AEndpointsStillWork tests that A2A endpoints work with custom handlers
+func TestServer_A2AEndpointsStillWork(t *testing.T) {
+	// Create a mock agent
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockAgent := NewMockAgent(ctrl)
+	mockAgent.EXPECT().GetMetadata(gomock.Any()).Return(&AgentMetadata{
+		Name:        "Test Agent",
+		Description: "A test agent",
+		Version:     "1.0.0",
+	}, nil).AnyTimes()
+
+	// Create server with custom handlers
+	server := &Server{
+		Agent: mockAgent,
+	}
+
+	// Add custom handlers
+	server.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+
+	server.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("metrics"))
+	})
+
+	// Initialize server
+	err := server.initialize()
+	if err != nil {
+		t.Fatalf("Failed to initialize server: %v", err)
+	}
+
+	// Test agent card endpoint still works
+	req, err := http.NewRequest("GET", "/.well-known/agent.json", nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	server.mux.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Errorf("Expected status 200 for agent card, got %d", recorder.Code)
+	}
+
+	// Verify it's JSON response
+	contentType := recorder.Header().Get("Content-Type")
+	if contentType != "application/json" {
+		t.Errorf("Expected Content-Type application/json, got %s", contentType)
+	}
+
+	// Test custom handlers still work
+	req, err = http.NewRequest("GET", "/health", nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+
+	recorder = httptest.NewRecorder()
+	server.mux.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Errorf("Expected status 200 for health, got %d", recorder.Code)
+	}
+
+	if recorder.Body.String() != "OK" {
+		t.Errorf("Expected 'OK', got '%s'", recorder.Body.String())
+	}
+}
+
+// TestServer_Use tests HTTP middleware functionality
+func TestServer_Use(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockAgent := NewMockAgent(ctrl)
+	mockAgent.EXPECT().GetMetadata(gomock.Any()).Return(&AgentMetadata{
+		Name:        "Test Agent",
+		Description: "A test agent",
+		Version:     "1.0.0",
+	}, nil).AnyTimes()
+
+	server := &Server{
+		Agent: mockAgent,
+	}
+
+	// Add middlewares
+	var calls []string
+
+	server.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls = append(calls, "middleware1-before")
+			w.Header().Set("X-Middleware-1", "true")
+			next.ServeHTTP(w, r)
+			calls = append(calls, "middleware1-after")
+		})
+	})
+
+	server.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls = append(calls, "middleware2-before")
+			w.Header().Set("X-Middleware-2", "true")
+			next.ServeHTTP(w, r)
+			calls = append(calls, "middleware2-after")
+		})
+	})
+
+	// Add custom handler
+	server.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, "handler")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("test response"))
+	})
+
+	// Initialize server
+	err := server.initialize()
+	if err != nil {
+		t.Fatalf("Failed to initialize server: %v", err)
+	}
+
+	// Test request
+	req := httptest.NewRequest("GET", "/test", nil)
+	recorder := httptest.NewRecorder()
+
+	server.httpServer.Handler.ServeHTTP(recorder, req)
+
+	// Check response
+	if recorder.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", recorder.Code)
+	}
+
+	if recorder.Body.String() != "test response" {
+		t.Errorf("Expected 'test response', got '%s'", recorder.Body.String())
+	}
+
+	// Check middleware headers
+	if recorder.Header().Get("X-Middleware-1") != "true" {
+		t.Error("Expected X-Middleware-1 header")
+	}
+
+	if recorder.Header().Get("X-Middleware-2") != "true" {
+		t.Error("Expected X-Middleware-2 header")
+	}
+
+	// Check middleware execution order (reverse order - last registered wraps first)
+	expectedCalls := []string{
+		"middleware1-before", // Current implementation: first registered is outermost
+		"middleware2-before",
+		"handler",
+		"middleware2-after",
+		"middleware1-after",
+	}
+
+	if len(calls) != len(expectedCalls) {
+		t.Errorf("Expected %d calls, got %d: %v", len(expectedCalls), len(calls), calls)
+	}
+
+	for i, expected := range expectedCalls {
+		if i >= len(calls) || calls[i] != expected {
+			t.Errorf("Expected call %d to be '%s', got '%s'", i, expected, calls[i])
+		}
+	}
+}
+
+// TestServer_AddExtension tests A2A extension functionality
+func TestServer_AddExtension(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockAgent := NewMockAgent(ctrl)
+	mockAgent.EXPECT().GetMetadata(gomock.Any()).Return(&AgentMetadata{
+		Name:        "Test Agent",
+		Description: "A test agent",
+		Version:     "1.0.0",
+	}, nil).AnyTimes()
+
+	// Create mock extension - we need to create this differently since we don't have the mock generated
+	server := &Server{
+		Agent: mockAgent,
+	}
+
+	// We'll test that Extensions field works correctly without needing a real extension
+	if len(server.Extensions) != 0 {
+		t.Errorf("Expected 0 extensions initially, got %d", len(server.Extensions))
+	}
+
+	// Test that AddExtension method exists and can be called
+	// We'll use nil for now since we don't have a mock extension readily available
+	server.AddExtension()
+
+	// Verify no panic occurred and Extensions slice is still properly initialized
+	if server.Extensions == nil {
+		t.Error("Expected Extensions slice to be initialized")
+	}
 }

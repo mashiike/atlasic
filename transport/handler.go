@@ -30,6 +30,7 @@ type handlerConfig struct {
 	authenticator        Authenticator
 	authRequired         bool
 	extensions           []Extension
+	internalErrorBuilder func(context.Context, interface{}, error) (int, string, interface{}) // Custom internal error builder
 }
 
 // WithRPCPath sets the JSON-RPC endpoint path (default: "/")
@@ -72,6 +73,13 @@ func WithLogger(logger *slog.Logger) HandlerOption {
 func WithExtensions(extensions ...Extension) HandlerOption {
 	return func(c *handlerConfig) {
 		c.extensions = append(c.extensions, extensions...)
+	}
+}
+
+// WithInternalErrorBuilder sets a custom internal error builder for the handler
+func WithInternalErrorBuilder(builder func(context.Context, interface{}, error) (int, string, interface{})) HandlerOption {
+	return func(c *handlerConfig) {
+		c.internalErrorBuilder = builder
 	}
 }
 
@@ -192,8 +200,9 @@ func (h *Handler) registerJSONMethod(method string, handler JSONRPCMethodHandler
 				h.writeErrorResponse(w, id, jsonrpcErr.Code, jsonrpcErr.Message, jsonrpcErr.Data)
 				return nil
 			}
-			// Convert regular errors to JSON-RPC Internal Server Error
-			h.writeErrorResponse(w, id, a2a.ErrorCodeInternalError, a2a.ErrorCodeText(a2a.ErrorCodeInternalError), err.Error())
+			// Convert regular errors to JSON-RPC Internal Error
+			code, message, data := h.buildInternalError(ctx, id, err)
+			h.writeErrorResponse(w, id, code, message, data)
 			return nil
 		}
 
@@ -385,11 +394,12 @@ func (h *Handler) routeMethodByRegistry(ctx context.Context, req a2a.JSONRPCRequ
 			return
 		}
 
-		// Convert regular errors to JSON-RPC Internal Server Error
+		// Convert regular errors to JSON-RPC Internal Error
+		code, message, data := h.buildInternalError(ctx, req.ID, err)
 		if isSSEMethod {
-			h.writeSSEError(w, req.ID, a2a.ErrorCodeInternalError, a2a.ErrorCodeText(a2a.ErrorCodeInternalError), err.Error())
+			h.writeSSEError(w, req.ID, code, message, data)
 		} else {
-			h.writeErrorResponse(w, req.ID, a2a.ErrorCodeInternalError, a2a.ErrorCodeText(a2a.ErrorCodeInternalError), err.Error())
+			h.writeErrorResponse(w, req.ID, code, message, data)
 		}
 		return
 	}
@@ -752,6 +762,18 @@ func (h *Handler) tryMethodSpecificPreprocessing(ctx context.Context, method str
 	}
 
 	return false, nil // No method-specific interface found
+}
+
+// buildInternalError builds internal error components using custom builder if configured
+func (h *Handler) buildInternalError(ctx context.Context, id interface{}, originalError error) (code int, message string, data interface{}) {
+	if h.config.internalErrorBuilder != nil {
+		// If custom builder is set, use it to build error response
+		return h.config.internalErrorBuilder(ctx, id, originalError)
+	}
+	code = a2a.ErrorCodeInternalError
+	message = a2a.ErrorCodeText(a2a.ErrorCodeInternalError)
+	h.config.logger.Error("Internal error occurred", "error", originalError, "id", id)
+	return code, message, nil
 }
 
 // writeSuccessResponse writes a successful JSON-RPC response
