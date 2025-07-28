@@ -25,6 +25,9 @@ go.work.sum
 /build
 /dist
 
+# Test output images
+model/openai/testdata/dist
+
 # Example binaries
 _examples/client/client
 _examples/local/server
