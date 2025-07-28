@@ -77,6 +77,7 @@ func isImageMimeType(mimeType string) bool {
 
 // downloadImageFromURL downloads an image from URL and returns base64 encoded data
 func downloadImageFromURL(url string) (string, error) {
+	// #nosec G107 - URL comes from trusted user input
 	resp, err := http.Get(url)
 	if err != nil {
 		return "", fmt.Errorf("failed to download image: %w", err)

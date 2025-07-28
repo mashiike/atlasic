@@ -48,7 +48,16 @@ func TestTextModel_ConvertMessage(t *testing.T) {
 		// Extract user message from union
 		userMsg := openaiMsgs[0].OfUser
 		require.NotNil(t, userMsg)
-		assert.Equal(t, "Hello, how are you?", userMsg.Content.OfString.Value)
+
+		// With Vision API implementation, single text messages are passed as content array
+		contentArray := userMsg.Content.OfArrayOfContentParts
+		require.NotNil(t, contentArray)
+		require.Len(t, contentArray, 1)
+
+		// Check the text content part
+		textPart := contentArray[0].OfText
+		require.NotNil(t, textPart)
+		assert.Equal(t, "Hello, how are you?", textPart.Text)
 	})
 
 	t.Run("assistant message with text", func(t *testing.T) {
@@ -124,15 +133,23 @@ func TestTextModel_ConvertMessage(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, openaiMsgs, 1)
 
-		// Currently converts to simple text message with image placeholder
-		// TODO: Update when proper vision support is implemented
+		// With proper Vision API support, should have content array with text and image
 		userMsg := openaiMsgs[0].OfUser
 		require.NotNil(t, userMsg)
 
-		// Should contain both text and image placeholder
-		content := userMsg.Content.OfString
-		require.NotNil(t, content)
-		assert.Contains(t, content.Value, "What's in this image?")
-		assert.Contains(t, content.Value, "[Image: test.png]")
+		// Should have content array with text and image parts
+		contentArray := userMsg.Content.OfArrayOfContentParts
+		require.NotEmpty(t, contentArray)
+		require.Len(t, contentArray, 2) // Text + Image
+
+		// First part should be text
+		textPart := contentArray[0].OfText
+		require.NotNil(t, textPart)
+		assert.Equal(t, "What's in this image?", textPart.Text)
+
+		// Second part should be image
+		imageContentPart := contentArray[1].OfImageURL
+		require.NotNil(t, imageContentPart)
+		assert.Contains(t, imageContentPart.ImageURL.URL, "data:image/png;base64,")
 	})
 }

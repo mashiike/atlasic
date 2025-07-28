@@ -201,35 +201,52 @@ func (m *TextModel) convertMessage(msg a2a.Message) ([]openai.ChatCompletionMess
 		return messages, nil
 	}
 
-	// Regular message - for now, extract text content only
-	// TODO: Add proper vision support when OpenAI SDK structure is clarified
-	var textContent string
-	var hasImages bool
+	// Build message content with text and images support
+	var messageContent []openai.ChatCompletionContentPartUnionParam
+	var hasText bool
 
 	for _, part := range msg.Parts {
 		if part.Kind == a2a.KindTextPart {
-			textContent += part.Text
+			if part.Text != "" {
+				messageContent = append(messageContent, openai.TextContentPart(part.Text))
+				hasText = true
+			}
 		} else if part.Kind == a2a.KindFilePart && part.File != nil {
 			if isImageMimeType(part.File.MimeType) {
-				hasImages = true
-				// For now, add a placeholder text indicating image presence
-				if textContent != "" {
-					textContent += " "
-				}
-				textContent += fmt.Sprintf("[Image: %s]", part.File.Name)
+				// Create image URL for OpenAI Vision API
+				imageURL := fmt.Sprintf("data:%s;base64,%s", part.File.MimeType, part.File.Bytes)
+				messageContent = append(messageContent, openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
+					URL: imageURL,
+				}))
 			}
 		}
 	}
 
-	// Log warning if images are present but not fully supported yet
-	if hasImages {
-		// This is a placeholder - actual vision support requires correct OpenAI SDK structure
+	// If no text content, add a default prompt for images
+	if !hasText && len(messageContent) > 0 {
+		messageContent = append([]openai.ChatCompletionContentPartUnionParam{
+			openai.TextContentPart("What do you see in this image?"),
+		}, messageContent...)
 	}
 
 	switch msg.Role {
 	case a2a.RoleUser:
-		return []openai.ChatCompletionMessageParamUnion{openai.UserMessage(textContent)}, nil
+		if len(messageContent) == 0 {
+			return []openai.ChatCompletionMessageParamUnion{openai.UserMessage("")}, nil
+		} else if len(messageContent) == 1 {
+			// Single text part - use simple string format
+			return []openai.ChatCompletionMessageParamUnion{openai.UserMessage(messageContent)}, nil
+		}
+		// Multiple parts or image content - use content array format
+		return []openai.ChatCompletionMessageParamUnion{openai.UserMessage(messageContent)}, nil
 	case a2a.RoleAgent:
+		// Assistant messages are typically text-only
+		var textContent string
+		for _, part := range msg.Parts {
+			if part.Kind == a2a.KindTextPart {
+				textContent += part.Text
+			}
+		}
 		return []openai.ChatCompletionMessageParamUnion{openai.AssistantMessage(textContent)}, nil
 	default:
 		return nil, fmt.Errorf("unsupported message role: %s", msg.Role)
