@@ -2,6 +2,7 @@ package atlasic
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -102,7 +103,8 @@ func TestStaticAPIKeyAuthenticator_SecuritySchemes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			schemes := tt.auth.GetSecuritySchemes()
+			req := &http.Request{Header: make(http.Header)}
+			schemes := tt.auth.GetSecuritySchemes(req)
 
 			apiKeyScheme, exists := schemes["apiKey"]
 			if !exists {
@@ -294,7 +296,8 @@ func TestJWTAuthenticator_MissingBearer(t *testing.T) {
 
 func TestJWTAuthenticator_SecuritySchemes(t *testing.T) {
 	auth := NewJWTAuthenticator([]byte("secret"))
-	schemes := auth.GetSecuritySchemes()
+	req := &http.Request{Header: make(http.Header)}
+	schemes := auth.GetSecuritySchemes(req)
 
 	bearerScheme, exists := schemes["bearer"]
 	if !exists {
