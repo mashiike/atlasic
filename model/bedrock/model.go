@@ -307,10 +307,16 @@ func (m *Model) convertResponse(output *bedrockruntime.ConverseOutput) (*model.G
 
 	// Convert usage information
 	if output.Usage != nil {
+		inputTokens := int(aws.ToInt32(output.Usage.InputTokens))
+		outputTokens := int(aws.ToInt32(output.Usage.OutputTokens))
+		totalTokens := int(aws.ToInt32(output.Usage.TotalTokens))
+
 		response.Usage = &model.Usage{
-			PromptTokens:     int(aws.ToInt32(output.Usage.InputTokens)),
-			CompletionTokens: int(aws.ToInt32(output.Usage.OutputTokens)),
-			TotalTokens:      int(aws.ToInt32(output.Usage.TotalTokens)),
+			InputTokens:   model.Ptr(inputTokens),
+			OutputTokens:  model.Ptr(outputTokens),
+			TotalTokens:   model.Ptr(totalTokens),
+			ModelID:       m.modelID,
+			ProviderUsage: output.Usage, // Store raw Bedrock usage data
 		}
 	}
 
@@ -391,6 +397,9 @@ func (m *Model) convertResponse(output *bedrockruntime.ConverseOutput) (*model.G
 			}
 		}
 	}
+
+	// Store the complete Bedrock response
+	response.RawResponse = output
 
 	return response, nil
 }

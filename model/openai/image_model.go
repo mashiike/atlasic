@@ -100,14 +100,19 @@ func (m *ImageModel) generateFromText(ctx context.Context, prompt string) (*mode
 	// Create response message
 	responseMessage := a2a.NewMessage("openai-image", a2a.RoleAgent, []a2a.Part{imagePart})
 
+	// Get resolution from generation params (default: 1024x1024)
+	resolution := "1024x1024" // Default for GPT Image 1
+
 	return &model.GenerateResponse{
 		Message:    responseMessage,
 		StopReason: model.StopReasonEndTurn,
 		Usage: &model.Usage{
-			PromptTokens:     0, // OpenAI doesn't provide token usage for image generation
-			CompletionTokens: 0,
-			TotalTokens:      0,
+			// Image-specific usage information
+			ImageRequests:   model.Ptr(1),
+			ImageResolution: &resolution,
+			ModelID:         m.modelID,
 		},
+		RawResponse: response, // Store raw OpenAI image response
 	}, nil
 }
 
@@ -166,24 +171,21 @@ func (m *ImageModel) generateWithImages(ctx context.Context, prompt string, inpu
 	responseMessage := a2a.NewMessage("openai-image-edit", a2a.RoleAgent, []a2a.Part{imagePart})
 
 	// Extract usage information if available (GPT Image 1 provides usage data)
-	var usage *model.Usage
+	usage := &model.Usage{
+		ModelID:       m.modelID,
+		ImageRequests: model.Ptr(len(inputImages)), // Number of images processed
+	}
+
 	if response.Usage.InputTokens > 0 || response.Usage.OutputTokens > 0 {
-		usage = &model.Usage{
-			PromptTokens:     int(response.Usage.InputTokens),
-			CompletionTokens: int(response.Usage.OutputTokens),
-			TotalTokens:      int(response.Usage.TotalTokens),
-		}
-	} else {
-		usage = &model.Usage{
-			PromptTokens:     0,
-			CompletionTokens: 0,
-			TotalTokens:      0,
-		}
+		usage.InputTokens = model.Ptr(int(response.Usage.InputTokens))
+		usage.OutputTokens = model.Ptr(int(response.Usage.OutputTokens))
+		usage.TotalTokens = model.Ptr(int(response.Usage.TotalTokens))
 	}
 
 	return &model.GenerateResponse{
-		Message:    responseMessage,
-		StopReason: model.StopReasonEndTurn,
-		Usage:      usage,
+		Message:     responseMessage,
+		StopReason:  model.StopReasonEndTurn,
+		Usage:       usage,
+		RawResponse: response, // Store raw OpenAI edit response
 	}, nil
 }

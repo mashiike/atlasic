@@ -76,17 +76,30 @@ const (
 
 // GenerateResponse contains the response from text generation
 type GenerateResponse struct {
-	Message    a2a.Message    `json:"message"`
-	StopReason StopReason     `json:"stop_reason"`
-	Usage      *Usage         `json:"usage,omitempty"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
+	Message     a2a.Message    `json:"message"`
+	StopReason  StopReason     `json:"stop_reason"`
+	Usage       *Usage         `json:"usage,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+	RawResponse any            `json:"raw_response,omitempty"` // Provider-specific raw response (e.g., openai.ChatCompletion, bedrockruntime.ConverseOutput)
 }
 
-// Usage contains token usage information
+// Usage contains comprehensive token usage information
 type Usage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	// Token usage
+	InputTokens  *int `json:"input_tokens,omitempty"`  // Input/prompt tokens
+	OutputTokens *int `json:"output_tokens,omitempty"` // Output/completion tokens
+	TotalTokens  *int `json:"total_tokens,omitempty"`  // Total tokens used
+
+	// Image-specific usage
+	ImageTokens     *int    `json:"image_tokens,omitempty"`     // Tokens used for image processing
+	ImageRequests   *int    `json:"image_requests,omitempty"`   // Number of image generation requests
+	ImageResolution *string `json:"image_resolution,omitempty"` // Image resolution (e.g., "1024x1024")
+
+	// Provider-specific usage details
+	ProviderUsage any `json:"provider_usage,omitempty"` // Raw usage data from provider (e.g., openai.Usage, bedrock usage metrics)
+
+	// Model information
+	ModelID string `json:"model_id,omitempty"` // Model used for generation
 }
 
 // ModelProvider manages models for a specific provider (e.g., ollama, openai)
