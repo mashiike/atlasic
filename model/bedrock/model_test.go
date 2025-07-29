@@ -135,8 +135,12 @@ func TestModel_Generate_TextOnly(t *testing.T) {
 		t.Errorf("Expected 'Hello! How can I help you?', got %s", resp.Message.Parts[0].Text)
 	}
 
-	if resp.Usage.TotalTokens != 18 {
-		t.Errorf("Expected 18 total tokens, got %d", resp.Usage.TotalTokens)
+	if resp.Usage.TotalTokens == nil || *resp.Usage.TotalTokens != 18 {
+		if resp.Usage.TotalTokens == nil {
+			t.Error("Expected TotalTokens to be non-nil")
+		} else {
+			t.Errorf("Expected 18 total tokens, got %d", *resp.Usage.TotalTokens)
+		}
 	}
 }
 

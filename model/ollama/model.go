@@ -377,13 +377,14 @@ func (m *Model) convertResponse(resp ChatResponse) (*model.GenerateResponse, err
 	// Create the response message
 	response.Message = a2a.NewMessage("ollama-response", a2a.RoleAgent, parts)
 
-	// Note: Ollama doesn't provide token usage information in the same way
-	// You might need to estimate or leave it empty
+	// Note: Ollama doesn't provide token usage information
 	response.Usage = &model.Usage{
-		PromptTokens:     0, // Not provided by Ollama
-		CompletionTokens: 0, // Not provided by Ollama
-		TotalTokens:      0, // Not provided by Ollama
+		ModelID: m.modelID,
+		// Ollama doesn't provide token counts, so we leave them as nil
 	}
+
+	// Store raw Ollama response
+	response.RawResponse = resp
 
 	return response, nil
 }

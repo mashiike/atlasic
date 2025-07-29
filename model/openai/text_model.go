@@ -300,16 +300,19 @@ func (m *TextModel) convertResponse(response *openai.ChatCompletion) (*model.Gen
 	// Create response message
 	responseMessage := a2a.NewMessage("openai-text", a2a.RoleAgent, parts)
 
-	// Create usage info
+	// Create comprehensive usage info
 	usage := &model.Usage{
-		PromptTokens:     int(response.Usage.PromptTokens),
-		CompletionTokens: int(response.Usage.CompletionTokens),
-		TotalTokens:      int(response.Usage.TotalTokens),
+		InputTokens:   model.Ptr(int(response.Usage.PromptTokens)),
+		OutputTokens:  model.Ptr(int(response.Usage.CompletionTokens)),
+		TotalTokens:   model.Ptr(int(response.Usage.TotalTokens)),
+		ModelID:       m.modelID,
+		ProviderUsage: response.Usage, // Store raw OpenAI usage data
 	}
 
 	return &model.GenerateResponse{
-		Message:    responseMessage,
-		StopReason: stopReason,
-		Usage:      usage,
+		Message:     responseMessage,
+		StopReason:  stopReason,
+		Usage:       usage,
+		RawResponse: response, // Store the complete OpenAI response
 	}, nil
 }
