@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -446,44 +447,44 @@ func (s *S3Storage) DeleteTaskFile(ctx context.Context, taskID, path string) err
 
 func (s *S3Storage) getTaskKey(taskID string) string {
 	if s.prefix != "" {
-		return fmt.Sprintf("%s/tasks/%s.json", s.prefix, taskID)
+		return path.Join(s.prefix, "tasks", taskID+".json")
 	}
-	return fmt.Sprintf("tasks/%s.json", taskID)
+	return path.Join("tasks", taskID+".json")
 }
 
 func (s *S3Storage) getContextPrefix(contextID string) string {
 	if s.prefix != "" {
-		return fmt.Sprintf("%s/contexts/%s/", s.prefix, contextID)
+		return path.Join(s.prefix, "contexts", contextID) + "/"
 	}
-	return fmt.Sprintf("contexts/%s/", contextID)
+	return path.Join("contexts", contextID) + "/"
 }
 
 func (s *S3Storage) getContextIndexKey(contextID, taskID string) string {
 	if s.prefix != "" {
-		return fmt.Sprintf("%s/contexts/%s/%s.txt", s.prefix, contextID, taskID)
+		return path.Join(s.prefix, "contexts", contextID, taskID+".txt")
 	}
-	return fmt.Sprintf("contexts/%s/%s.txt", contextID, taskID)
+	return path.Join("contexts", contextID, taskID+".txt")
 }
 
 func (s *S3Storage) getEventsKey(contextID, taskID string) string {
 	if s.prefix != "" {
-		return fmt.Sprintf("%s/events/%s/%s.json", s.prefix, contextID, taskID)
+		return path.Join(s.prefix, "events", contextID, taskID+".json")
 	}
-	return fmt.Sprintf("events/%s/%s.json", contextID, taskID)
+	return path.Join("events", contextID, taskID+".json")
 }
 
 func (s *S3Storage) getPushNotificationConfigKey(taskID, configID string) string {
 	if s.prefix != "" {
-		return fmt.Sprintf("%s/push-configs/%s/%s.json", s.prefix, taskID, configID)
+		return path.Join(s.prefix, "push-configs", taskID, configID+".json")
 	}
-	return fmt.Sprintf("push-configs/%s/%s.json", taskID, configID)
+	return path.Join("push-configs", taskID, configID+".json")
 }
 
 func (s *S3Storage) getPushNotificationConfigPrefix(taskID string) string {
 	if s.prefix != "" {
-		return fmt.Sprintf("%s/push-configs/%s/", s.prefix, taskID)
+		return path.Join(s.prefix, "push-configs", taskID) + "/"
 	}
-	return fmt.Sprintf("push-configs/%s/", taskID)
+	return path.Join("push-configs", taskID) + "/"
 }
 
 func (s *S3Storage) extractTaskIDFromContextKey(key string) string {
@@ -514,21 +515,18 @@ func (s *S3Storage) extractConfigIDFromKey(key string) string {
 	return ""
 }
 
-func (s *S3Storage) getContextFileKey(contextID, path string) string {
+func (s *S3Storage) getContextFileKey(contextID, filePath string) string {
 	if s.prefix != "" {
-		return fmt.Sprintf("%s/fs/context/%s/%s", s.prefix, contextID, path)
+		return path.Join(s.prefix, "fs/context", contextID, filePath)
 	}
-	return fmt.Sprintf("fs/context/%s/%s", contextID, path)
+	return path.Join("fs/context", contextID, filePath)
 }
 
 func (s *S3Storage) getContextFilePrefix(contextID, pathPrefix string) string {
-	if pathPrefix == "" {
-		pathPrefix = ""
-	}
 	if s.prefix != "" {
-		return fmt.Sprintf("%s/fs/context/%s/%s", s.prefix, contextID, pathPrefix)
+		return path.Join(s.prefix, "fs/context", contextID, pathPrefix)
 	}
-	return fmt.Sprintf("fs/context/%s/%s", contextID, pathPrefix)
+	return path.Join("fs/context", contextID, pathPrefix)
 }
 
 func (s *S3Storage) extractContextFileRelPath(contextID, key string) string {
@@ -539,21 +537,18 @@ func (s *S3Storage) extractContextFileRelPath(contextID, key string) string {
 	return ""
 }
 
-func (s *S3Storage) getTaskFileKey(taskID, path string) string {
+func (s *S3Storage) getTaskFileKey(taskID, filePath string) string {
 	if s.prefix != "" {
-		return fmt.Sprintf("%s/fs/task/%s/%s", s.prefix, taskID, path)
+		return path.Join(s.prefix, "fs/task", taskID, filePath)
 	}
-	return fmt.Sprintf("fs/task/%s/%s", taskID, path)
+	return path.Join("fs/task", taskID, filePath)
 }
 
 func (s *S3Storage) getTaskFilePrefix(taskID, pathPrefix string) string {
-	if pathPrefix == "" {
-		pathPrefix = ""
-	}
 	if s.prefix != "" {
-		return fmt.Sprintf("%s/fs/task/%s/%s", s.prefix, taskID, pathPrefix)
+		return path.Join(s.prefix, "fs/task", taskID, pathPrefix)
 	}
-	return fmt.Sprintf("fs/task/%s/%s", taskID, pathPrefix)
+	return path.Join("fs/task", taskID, pathPrefix)
 }
 
 func (s *S3Storage) extractTaskFileRelPath(taskID, key string) string {
