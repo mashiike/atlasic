@@ -1,5 +1,8 @@
 # Changelog
 
+## [v0.2.2](https://github.com/mashiike/atlasic/compare/v0.2.1...v0.2.2) - 2025-07-29
+- Enhance Authenticator interface and extract base URL utility function by @mashiike in https://github.com/mashiike/atlasic/pull/17
+
 ## [v0.2.1](https://github.com/mashiike/atlasic/compare/v0.2.0...v0.2.1) - 2025-07-29
 - Fix S3 path joining to handle prefix trailing slashes properly by @mashiike in https://github.com/mashiike/atlasic/pull/15
 
