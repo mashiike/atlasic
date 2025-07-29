@@ -100,10 +100,10 @@ type ModelProvider interface {
 // =============================================================================
 
 // PreGenerateHook is called before Model.Generate is executed
-type PreGenerateHook func(ctx context.Context, req *GenerateRequest) error
+type PreGenerateHook func(ctx context.Context, providerID string, m Model, req *GenerateRequest) error
 
 // PostGenerateHook is called after Model.Generate is executed
-type PostGenerateHook func(ctx context.Context, req *GenerateRequest, resp *GenerateResponse, err error) error
+type PostGenerateHook func(ctx context.Context, providerID string, m Model, req *GenerateRequest, resp *GenerateResponse, err error) error
 
 // ModelHooks contains hook functions for model operations
 type ModelHooks struct {
@@ -113,8 +113,9 @@ type ModelHooks struct {
 
 // HookedModel wraps a Model with hooks
 type HookedModel struct {
-	model Model
-	hooks *ModelHooks
+	model      Model
+	hooks      *ModelHooks
+	providerID string
 }
 
 // ID returns the ID of the wrapped model
@@ -136,7 +137,7 @@ func (h *HookedModel) OutputModes() []string {
 func (h *HookedModel) Generate(ctx context.Context, req *GenerateRequest) (*GenerateResponse, error) {
 	// Execute pre-generate hooks
 	for _, hook := range h.hooks.PreGenerate {
-		if err := hook(ctx, req); err != nil {
+		if err := hook(ctx, h.providerID, h.model, req); err != nil {
 			return nil, fmt.Errorf("pre-generate hook failed: %w", err)
 		}
 	}
@@ -146,7 +147,7 @@ func (h *HookedModel) Generate(ctx context.Context, req *GenerateRequest) (*Gene
 
 	// Execute post-generate hooks
 	for _, hook := range h.hooks.PostGenerate {
-		if hookErr := hook(ctx, req, resp, err); hookErr != nil {
+		if hookErr := hook(ctx, h.providerID, h.model, req, resp, err); hookErr != nil {
 			// Log the hook error but don't override the original error
 			// In a real implementation, you might want to use a proper logger
 			fmt.Printf("Warning: post-generate hook failed: %v\n", hookErr)
@@ -279,8 +280,9 @@ func (r *Registry) GetModel(ctx context.Context, providerName, modelID string) (
 
 	// Wrap with hooks
 	return &HookedModel{
-		model: model,
-		hooks: hooks,
+		model:      model,
+		hooks:      hooks,
+		providerID: providerName,
 	}, nil
 }
 

@@ -283,12 +283,12 @@ func TestModelHooks_PreGenerateHook(t *testing.T) {
 	var postHookCalled bool
 
 	// Add hooks
-	registry.AddPreGenerateHook(func(ctx context.Context, req *GenerateRequest) error {
+	registry.AddPreGenerateHook(func(ctx context.Context, providerID string, m Model, req *GenerateRequest) error {
 		preHookCalled = true
 		return nil
 	})
 
-	registry.AddPostGenerateHook(func(ctx context.Context, req *GenerateRequest, resp *GenerateResponse, err error) error {
+	registry.AddPostGenerateHook(func(ctx context.Context, providerID string, m Model, req *GenerateRequest, resp *GenerateResponse, err error) error {
 		postHookCalled = true
 		return nil
 	})
@@ -333,7 +333,7 @@ func TestModelHooks_PreGenerateHookError(t *testing.T) {
 	registry.Register("test-provider", mockProvider)
 
 	// Add failing pre-hook
-	registry.AddPreGenerateHook(func(ctx context.Context, req *GenerateRequest) error {
+	registry.AddPreGenerateHook(func(ctx context.Context, providerID string, m Model, req *GenerateRequest) error {
 		return errors.New("pre-hook error")
 	})
 
@@ -406,12 +406,12 @@ func TestGlobalRegistryHooks(t *testing.T) {
 	var postHookCalled bool
 
 	// Add hooks via global functions
-	AddPreGenerateHook(func(ctx context.Context, req *GenerateRequest) error {
+	AddPreGenerateHook(func(ctx context.Context, providerID string, m Model, req *GenerateRequest) error {
 		preHookCalled = true
 		return nil
 	})
 
-	AddPostGenerateHook(func(ctx context.Context, req *GenerateRequest, resp *GenerateResponse, err error) error {
+	AddPostGenerateHook(func(ctx context.Context, providerID string, m Model, req *GenerateRequest, resp *GenerateResponse, err error) error {
 		postHookCalled = true
 		return nil
 	})
