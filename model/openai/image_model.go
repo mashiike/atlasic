@@ -55,17 +55,33 @@ func (m *ImageModel) Generate(ctx context.Context, req *model.GenerateRequest) (
 		return m.generateWithImages(ctx, textPrompt, inputImages)
 	} else {
 		// Mode 1: Text → Image generation using Generate API
-		return m.generateFromText(ctx, textPrompt)
+		return m.generateFromText(ctx, textPrompt, req)
 	}
 }
 
 // generateFromText generates images from text prompts (Mode 1) using Generate API
-func (m *ImageModel) generateFromText(ctx context.Context, prompt string) (*model.GenerateResponse, error) {
+func (m *ImageModel) generateFromText(ctx context.Context, prompt string, req *model.GenerateRequest) (*model.GenerateResponse, error) {
 	// Create OpenAI image generation request using official SDK
 	params := openai.ImageGenerateParams{
-		Prompt: prompt, // Prompt is required string field
-		// TODO: Add correct model and format constants when available
-		N: openai.Int(1),
+		Prompt: prompt,
+		Model:  m.modelID,
+		N:      openai.Int(1),
+	}
+
+	// Apply extensions if provided
+	if req != nil && req.Extensions != nil {
+		if size, ok := req.Extensions["size"].(string); ok {
+			params.Size = openai.ImageGenerateParamsSize(size)
+		}
+		if quality, ok := req.Extensions["quality"].(string); ok {
+			params.Quality = openai.ImageGenerateParamsQuality(quality)
+		}
+		if style, ok := req.Extensions["style"].(string); ok {
+			params.Style = openai.ImageGenerateParamsStyle(style)
+		}
+		if n, ok := req.Extensions["n"].(int); ok {
+			params.N = openai.Int(int64(n))
+		}
 	}
 
 	// Call OpenAI API using the Images service
