@@ -132,6 +132,90 @@ func main() {
 		w.Write([]byte(`{"version":"1.0.0","agent":"Local Agent"}`))
 	})
 
+	// Example: Custom handler using AgentService via Context
+	server.HandleFunc("/custom/tasks", func(w http.ResponseWriter, r *http.Request) {
+		// Get AgentService from context (automatically injected by middleware)
+		agentSvc := atlasic.GetAgentServiceFromContext(r.Context())
+		if agentSvc == nil {
+			http.Error(w, "AgentService not available", http.StatusInternalServerError)
+			return
+		}
+
+		switch r.Method {
+		case http.MethodPost:
+			// Create a new task
+			params := a2a.MessageSendParams{
+				Message: a2a.Message{
+					Parts: []a2a.Part{
+						a2a.NewTextPart("Hello from custom handler!"),
+					},
+				},
+			}
+
+			result, err := agentSvc.SendMessage(r.Context(), params)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Failed to send message: %v", err), http.StatusInternalServerError)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+				"task":    result.Task,
+			})
+
+		case http.MethodGet:
+			// List available output modes
+			outputModes, err := agentSvc.SupportedOutputModes(r.Context())
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Failed to get output modes: %v", err), http.StatusInternalServerError)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"supportedOutputModes": outputModes,
+			})
+
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
+	// Example: Get specific task by ID
+	server.HandleFunc("/custom/tasks/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Extract task ID from URL path
+		taskID := strings.TrimPrefix(r.URL.Path, "/custom/tasks/")
+		if taskID == "" {
+			http.Error(w, "Task ID required", http.StatusBadRequest)
+			return
+		}
+
+		// Get AgentService from context
+		agentSvc := atlasic.GetAgentServiceFromContext(r.Context())
+		if agentSvc == nil {
+			http.Error(w, "AgentService not available", http.StatusInternalServerError)
+			return
+		}
+
+		// Get task
+		task, err := agentSvc.GetTask(r.Context(), a2a.TaskQueryParams{
+			ID: taskID,
+		})
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get task: %v", err), http.StatusNotFound)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(task)
+	})
+
 	// Add HTTP middlewares using Use
 	server.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -150,7 +234,7 @@ func main() {
 	})
 
 	slog.Info("Starting server with custom endpoints", "addr", server.Addr,
-		"endpoints", []string{"/health", "/version", "/", "/.well-known/agent.json"})
+		"endpoints", []string{"/health", "/version", "/custom/tasks", "/custom/tasks/{id}", "/", "/.well-known/agent.json"})
 	if err := server.RunWithContext(ctx); err != nil {
 		slog.Error("Server error", "error", err)
 	}
