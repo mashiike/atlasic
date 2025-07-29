@@ -575,8 +575,9 @@ func (h *Handler) handleWellKnownAgentCard(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-// buildRequestBaseEndpoint constructs base endpoint from HTTP request considering proxies
-func (h *Handler) buildRequestBaseEndpoint(r *http.Request) string {
+// ExtractBaseURL extracts base URL from HTTP request considering proxies
+// This is a public utility function that can be used by Authenticators and other components
+func ExtractBaseURL(r *http.Request) string {
 	// Check X-Forwarded-Proto first, then fallback to TLS detection
 	scheme := "http"
 	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
@@ -592,6 +593,11 @@ func (h *Handler) buildRequestBaseEndpoint(r *http.Request) string {
 	}
 
 	return fmt.Sprintf("%s://%s/", scheme, host)
+}
+
+// buildRequestBaseEndpoint wraps the public function for backward compatibility
+func (h *Handler) buildRequestBaseEndpoint(r *http.Request) string {
+	return ExtractBaseURL(r)
 }
 
 // extractBaseAgentCard extracts a2a.AgentCard from extended card map
@@ -626,8 +632,8 @@ func (h *Handler) applyAgentCardPostProcessing(agentCard *a2a.AgentCard, r *http
 
 	// Add authentication information if authenticator is configured
 	if h.config.authenticator != nil {
-		agentCard.SecuritySchemes = h.config.authenticator.GetSecuritySchemes()
-		agentCard.Security = h.config.authenticator.GetSecurityRequirements()
+		agentCard.SecuritySchemes = h.config.authenticator.GetSecuritySchemes(r)
+		agentCard.Security = h.config.authenticator.GetSecurityRequirements(r)
 	}
 }
 

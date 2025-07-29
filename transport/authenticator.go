@@ -16,11 +16,13 @@ type Authenticator interface {
 
 	// GetSecuritySchemes returns the security schemes supported by this authenticator
 	// This information is used to populate the AgentCard
-	GetSecuritySchemes() map[string]a2a.SecurityScheme
+	// The request parameter allows for request-specific scheme configuration
+	GetSecuritySchemes(r *http.Request) map[string]a2a.SecurityScheme
 
 	// GetSecurityRequirements returns the security requirements for this authenticator
 	// This information is used to populate the AgentCard
-	GetSecurityRequirements() []map[string][]string
+	// The request parameter allows for request-specific requirement configuration
+	GetSecurityRequirements(r *http.Request) []map[string][]string
 }
 
 // AuthError represents an authentication error

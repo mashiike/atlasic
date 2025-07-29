@@ -78,7 +78,7 @@ func (s StaticAPIKeyAuthenticator) Authenticate(ctx context.Context, r *http.Req
 }
 
 // GetSecuritySchemes implements the transport.Authenticator interface
-func (s StaticAPIKeyAuthenticator) GetSecuritySchemes() map[string]a2a.SecurityScheme {
+func (s StaticAPIKeyAuthenticator) GetSecuritySchemes(r *http.Request) map[string]a2a.SecurityScheme {
 	headerName := s.HeaderName
 	if headerName == "" {
 		headerName = "X-API-Key"
@@ -95,7 +95,7 @@ func (s StaticAPIKeyAuthenticator) GetSecuritySchemes() map[string]a2a.SecurityS
 }
 
 // GetSecurityRequirements implements the transport.Authenticator interface
-func (s StaticAPIKeyAuthenticator) GetSecurityRequirements() []map[string][]string {
+func (s StaticAPIKeyAuthenticator) GetSecurityRequirements(r *http.Request) []map[string][]string {
 	return []map[string][]string{
 		{"apiKey": {}}, // No specific scopes required for this simple example
 	}
@@ -254,7 +254,7 @@ func (j *JWTAuthenticator) Authenticate(ctx context.Context, r *http.Request) (*
 }
 
 // GetSecuritySchemes implements the transport.Authenticator interface
-func (j *JWTAuthenticator) GetSecuritySchemes() map[string]a2a.SecurityScheme {
+func (j *JWTAuthenticator) GetSecuritySchemes(r *http.Request) map[string]a2a.SecurityScheme {
 	return map[string]a2a.SecurityScheme{
 		"bearer": {
 			Type:         a2a.SecurityTypeHTTP,
@@ -266,7 +266,7 @@ func (j *JWTAuthenticator) GetSecuritySchemes() map[string]a2a.SecurityScheme {
 }
 
 // GetSecurityRequirements implements the transport.Authenticator interface
-func (j *JWTAuthenticator) GetSecurityRequirements() []map[string][]string {
+func (j *JWTAuthenticator) GetSecurityRequirements(r *http.Request) []map[string][]string {
 	return []map[string][]string{
 		{"bearer": {}}, // JWT validation handles scopes internally
 	}
