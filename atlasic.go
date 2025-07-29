@@ -499,7 +499,7 @@ func (s *AgentService) workerLoop(ctx context.Context) {
 				if err == ErrJobQueueClosed {
 					return
 				}
-				if err == context.Canceled || err == context.DeadlineExceeded {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					return
 				}
 				s.Logger.Error("Failed to dequeue job", "error", err)
@@ -1428,6 +1428,21 @@ func (s *Server) Handle(pattern string, handler http.Handler) {
 // It panics if the pattern is already registered or conflicts with A2A endpoints.
 func (s *Server) HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request)) {
 	s.Handle(pattern, http.HandlerFunc(handler))
+}
+
+// Handler returns the HTTP handler for the server.
+func (s *Server) Handler(r *http.Request) (http.Handler, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Ensure server is initialized
+	if s.mux == nil {
+		if err := s.initialize(); err != nil {
+			panic(fmt.Sprintf("failed to initialize server: %v", err))
+		}
+	}
+
+	return s.mux.Handler(r)
 }
 
 func (s *AgentService) DeleteTaskPushNotificationConfig(ctx context.Context, params a2a.DeleteTaskPushNotificationConfigParams) error {
