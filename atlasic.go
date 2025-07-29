@@ -20,6 +20,11 @@ import (
 	"github.com/mashiike/atlasic/transport"
 )
 
+const (
+	// agentServiceContextKey is the key for storing AgentService in context
+	agentServiceContextKey contextKey = "atlasic:agent-service"
+)
+
 //go:generate go tool mockgen -source=atlasic.go -destination=mock_test.go -package=atlasic
 //go:generate go tool mockgen -source=storage.go -destination=mock_storage_test.go -package=atlasic
 //go:generate go tool mockgen -source=id_generator.go -destination=mock_id_generator_test.go -package=atlasic
@@ -494,7 +499,7 @@ func (s *AgentService) workerLoop(ctx context.Context) {
 				if err == ErrJobQueueClosed {
 					return
 				}
-				if err == context.Canceled || err == context.DeadlineExceeded {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					return
 				}
 				s.Logger.Error("Failed to dequeue job", "error", err)
@@ -1029,6 +1034,15 @@ func (s *AgentService) SupportedOutputModes(ctx context.Context) ([]string, erro
 	return slices.Compact(outputModes), nil
 }
 
+// GetAgentServiceFromContext retrieves the AgentService from the given context.
+// Returns nil if no AgentService is found in the context.
+func GetAgentServiceFromContext(ctx context.Context) *AgentService {
+	if svc, ok := ctx.Value(agentServiceContextKey).(*AgentService); ok {
+		return svc
+	}
+	return nil
+}
+
 func (s *AgentService) GetAgentCard(ctx context.Context) (*a2a.AgentCard, error) {
 	meta, err := s.Agent.GetMetadata(ctx)
 	if err != nil {
@@ -1314,6 +1328,12 @@ func (s *Server) initialize() error {
 		s.agentService = NewAgentService(s.Storage, s.Agent)
 		s.agentService.JobQueue = s.JobQueue
 	}
+
+	// Automatically inject AgentService into request context for custom handlers
+	// This middleware is prepended to ensure it runs before any user-defined middlewares
+	s.middlewares = append([]func(http.Handler) http.Handler{
+		s.injectAgentServiceMiddleware,
+	}, s.middlewares...)
 	if s.RPCPath == "" {
 		s.RPCPath = transport.DefaultRPCPath
 	}
@@ -1410,6 +1430,21 @@ func (s *Server) HandleFunc(pattern string, handler func(http.ResponseWriter, *h
 	s.Handle(pattern, http.HandlerFunc(handler))
 }
 
+// Handler returns the HTTP handler for the server.
+func (s *Server) Handler(r *http.Request) (http.Handler, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Ensure server is initialized
+	if s.mux == nil {
+		if err := s.initialize(); err != nil {
+			panic(fmt.Sprintf("failed to initialize server: %v", err))
+		}
+	}
+
+	return s.mux.Handler(r)
+}
+
 func (s *AgentService) DeleteTaskPushNotificationConfig(ctx context.Context, params a2a.DeleteTaskPushNotificationConfigParams) error {
 	// Check if push notifications are enabled
 	if !s.pushNotificationsEnabled() {
@@ -1425,6 +1460,16 @@ func (s *AgentService) DeleteTaskPushNotificationConfig(ctx context.Context, par
 	}
 
 	return nil
+}
+
+// injectAgentServiceMiddleware injects the AgentService into the request context
+// This middleware is automatically applied to all requests to make AgentService
+// available to custom handlers via GetAgentServiceFromContext()
+func (s *Server) injectAgentServiceMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.WithValue(r.Context(), agentServiceContextKey, s.agentService)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 // applyMiddleware applies all registered middlewares to the given handler
