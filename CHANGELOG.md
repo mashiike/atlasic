@@ -1,5 +1,8 @@
 # Changelog
 
+## [v0.2.1](https://github.com/mashiike/atlasic/compare/v0.2.0...v0.2.1) - 2025-07-29
+- Fix S3 path joining to handle prefix trailing slashes properly by @mashiike in https://github.com/mashiike/atlasic/pull/15
+
 ## [v0.2.0](https://github.com/mashiike/atlasic/compare/v0.1.0...v0.2.0) - 2025-07-29
 - Implement OpenAI provider by @mashiike in https://github.com/mashiike/atlasic/pull/9
 - BREAKING CHANGE: Add providerID and Model to hook signatures by @mashiike in https://github.com/mashiike/atlasic/pull/11
