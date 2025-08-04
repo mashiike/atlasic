@@ -135,9 +135,9 @@ func main() {
 	// Example: Custom handler using AgentService via Context
 	server.HandleFunc("/custom/tasks", func(w http.ResponseWriter, r *http.Request) {
 		// Get AgentService from context (automatically injected by middleware)
-		agentSvc := atlasic.GetAgentServiceFromContext(r.Context())
-		if agentSvc == nil {
-			http.Error(w, "AgentService not available", http.StatusInternalServerError)
+		agentSvc, err := atlasic.GetAgentServiceFromContext(r.Context())
+		if err != nil {
+			http.Error(w, "AgentService not available: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 
@@ -197,9 +197,9 @@ func main() {
 		}
 
 		// Get AgentService from context
-		agentSvc := atlasic.GetAgentServiceFromContext(r.Context())
-		if agentSvc == nil {
-			http.Error(w, "AgentService not available", http.StatusInternalServerError)
+		agentSvc, err := atlasic.GetAgentServiceFromContext(r.Context())
+		if err != nil {
+			http.Error(w, "AgentService not available: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 
