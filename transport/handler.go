@@ -835,6 +835,107 @@ func (h *Handler) canHandle(r *http.Request) bool {
 		(r.Method == http.MethodPost && r.URL.Path == h.config.rpcPath)
 }
 
+// WrapAgentServiceWithExtensions wraps an AgentService with extension support
+// Returns a new AgentService that applies the specified extensions to all method calls
+func WrapAgentServiceWithExtensions(base AgentService, availableExtensions []Extension, extensionURIs []string) (AgentService, error) {
+	// Create extension map for validation/resolution
+	extensionMap := make(map[string]Extension)
+	for _, ext := range availableExtensions {
+		extensionMap[ext.GetMetadata().URI] = ext
+	}
+
+	// Validate required extensions
+	if err := ValidateRequiredExtensions(extensionMap, extensionURIs); err != nil {
+		return nil, fmt.Errorf("extension validation failed: %w", err)
+	}
+
+	// Resolve active extensions
+	activeExtensions := ResolveActiveExtensions(extensionMap, extensionURIs)
+
+	// Return extension-wrapped service
+	return &extensionWrappedAgentService{
+		base:             base,
+		activeExtensions: activeExtensions,
+	}, nil
+}
+
+// extensionWrappedAgentService wraps an AgentService with extension context
+type extensionWrappedAgentService struct {
+	base             AgentService
+	activeExtensions []Extension
+}
+
+// applyExtensionContext applies extension context to the base context
+func (s *extensionWrappedAgentService) applyExtensionContext(ctx context.Context) context.Context {
+	return WithActiveExtensions(ctx, s.activeExtensions)
+}
+
+// SendMessage sends a message with extension context applied
+func (s *extensionWrappedAgentService) SendMessage(ctx context.Context, params a2a.MessageSendParams) (*a2a.SendMessageResult, error) {
+	ctx = s.applyExtensionContext(ctx)
+	return s.base.SendMessage(ctx, params)
+}
+
+// SendStreamingMessage sends a streaming message with extension context applied
+func (s *extensionWrappedAgentService) SendStreamingMessage(ctx context.Context, params a2a.MessageSendParams) (<-chan a2a.StreamResponse, error) {
+	ctx = s.applyExtensionContext(ctx)
+	return s.base.SendStreamingMessage(ctx, params)
+}
+
+// GetTask gets a task with extension context applied
+func (s *extensionWrappedAgentService) GetTask(ctx context.Context, params a2a.TaskQueryParams) (*a2a.Task, error) {
+	ctx = s.applyExtensionContext(ctx)
+	return s.base.GetTask(ctx, params)
+}
+
+// CancelTask cancels a task with extension context applied
+func (s *extensionWrappedAgentService) CancelTask(ctx context.Context, params a2a.TaskIDParams) (*a2a.Task, error) {
+	ctx = s.applyExtensionContext(ctx)
+	return s.base.CancelTask(ctx, params)
+}
+
+// TaskResubscription resubscribes to task updates with extension context applied
+func (s *extensionWrappedAgentService) TaskResubscription(ctx context.Context, params a2a.TaskIDParams) (<-chan a2a.StreamResponse, error) {
+	ctx = s.applyExtensionContext(ctx)
+	return s.base.TaskResubscription(ctx, params)
+}
+
+// SetTaskPushNotificationConfig sets push notification config with extension context applied
+func (s *extensionWrappedAgentService) SetTaskPushNotificationConfig(ctx context.Context, params a2a.TaskPushNotificationConfig) (*a2a.TaskPushNotificationConfig, error) {
+	ctx = s.applyExtensionContext(ctx)
+	return s.base.SetTaskPushNotificationConfig(ctx, params)
+}
+
+// GetTaskPushNotificationConfig gets push notification config with extension context applied
+func (s *extensionWrappedAgentService) GetTaskPushNotificationConfig(ctx context.Context, params a2a.GetTaskPushNotificationConfigParams) (*a2a.TaskPushNotificationConfig, error) {
+	ctx = s.applyExtensionContext(ctx)
+	return s.base.GetTaskPushNotificationConfig(ctx, params)
+}
+
+// ListTaskPushNotificationConfig lists push notification configs with extension context applied
+func (s *extensionWrappedAgentService) ListTaskPushNotificationConfig(ctx context.Context, params a2a.TaskIDParams) ([]a2a.TaskPushNotificationConfig, error) {
+	ctx = s.applyExtensionContext(ctx)
+	return s.base.ListTaskPushNotificationConfig(ctx, params)
+}
+
+// DeleteTaskPushNotificationConfig deletes push notification config with extension context applied
+func (s *extensionWrappedAgentService) DeleteTaskPushNotificationConfig(ctx context.Context, params a2a.DeleteTaskPushNotificationConfigParams) error {
+	ctx = s.applyExtensionContext(ctx)
+	return s.base.DeleteTaskPushNotificationConfig(ctx, params)
+}
+
+// GetAgentCard gets agent card with extension context applied
+func (s *extensionWrappedAgentService) GetAgentCard(ctx context.Context) (*a2a.AgentCard, error) {
+	ctx = s.applyExtensionContext(ctx)
+	return s.base.GetAgentCard(ctx)
+}
+
+// SupportedOutputModes gets supported output modes with extension context applied
+func (s *extensionWrappedAgentService) SupportedOutputModes(ctx context.Context) ([]string, error) {
+	ctx = s.applyExtensionContext(ctx)
+	return s.base.SupportedOutputModes(ctx)
+}
+
 // A2AMiddleware creates middleware that handles A2A requests and passes others to next handler
 func A2AMiddleware(service AgentService, options ...HandlerOption) func(http.Handler) http.Handler {
 	a2aHandler := NewHandler(service, options...)

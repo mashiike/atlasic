@@ -23,6 +23,8 @@ import (
 const (
 	// agentServiceContextKey is the key for storing AgentService in context
 	agentServiceContextKey contextKey = "atlasic:agent-service"
+	// extensionsContextKey is the key for storing Extensions in context
+	extensionsContextKey contextKey = "atlasic:extensions"
 )
 
 //go:generate go tool mockgen -source=atlasic.go -destination=mock_test.go -package=atlasic
@@ -1035,12 +1037,28 @@ func (s *AgentService) SupportedOutputModes(ctx context.Context) ([]string, erro
 }
 
 // GetAgentServiceFromContext retrieves the AgentService from the given context.
-// Returns nil if no AgentService is found in the context.
-func GetAgentServiceFromContext(ctx context.Context) *AgentService {
-	if svc, ok := ctx.Value(agentServiceContextKey).(*AgentService); ok {
-		return svc
+// If extensionURIs are provided, returns an AgentService with those extensions applied.
+// Returns error if no AgentService is found in the context or extension processing fails.
+func GetAgentServiceFromContext(ctx context.Context, extensionURIs ...string) (transport.AgentService, error) {
+	svc, ok := ctx.Value(agentServiceContextKey).(*AgentService)
+	if !ok {
+		return nil, errors.New("no AgentService found in context")
 	}
-	return nil
+
+	// If no extensions requested, return the base service
+	if len(extensionURIs) == 0 {
+		return svc, nil
+	}
+
+	// Get extensions from context
+	extensions, ok := ctx.Value(extensionsContextKey).([]transport.Extension)
+	if !ok || len(extensions) == 0 {
+		// No extensions available, return base service
+		return svc, nil
+	}
+
+	// Use transport.WrapAgentServiceWithExtensions to create extension-aware service
+	return transport.WrapAgentServiceWithExtensions(svc, extensions, extensionURIs)
 }
 
 func (s *AgentService) GetAgentCard(ctx context.Context) (*a2a.AgentCard, error) {
@@ -1462,12 +1480,13 @@ func (s *AgentService) DeleteTaskPushNotificationConfig(ctx context.Context, par
 	return nil
 }
 
-// injectAgentServiceMiddleware injects the AgentService into the request context
-// This middleware is automatically applied to all requests to make AgentService
+// injectAgentServiceMiddleware injects the AgentService and Extensions into the request context
+// This middleware is automatically applied to all requests to make AgentService and Extensions
 // available to custom handlers via GetAgentServiceFromContext()
 func (s *Server) injectAgentServiceMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.WithValue(r.Context(), agentServiceContextKey, s.agentService)
+		ctx = context.WithValue(ctx, extensionsContextKey, s.Extensions)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
