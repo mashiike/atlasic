@@ -24,6 +24,7 @@ linters:
         - fmt.Fprintf
         - fmt.Fprintln
         - (net/http.ResponseWriter).Write
+        - (*github.com/fujiwara/ridge.StreamingResponseWriter).Close
 
     revive:
       max-open-files: 2048

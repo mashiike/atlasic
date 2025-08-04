@@ -297,14 +297,14 @@ func (tc *TaskCapture) OpenContextFile(ctx context.Context, path string, flag in
 
 	// Create context-specific directory
 	contextDir := filepath.Join(tc.tempDir, "context", tc.task.ContextID)
-	if err := os.MkdirAll(contextDir, 0755); err != nil {
+	if err := os.MkdirAll(contextDir, 0750); err != nil {
 		return nil, fmt.Errorf("failed to create context directory: %w", err)
 	}
 
 	filePath := filepath.Join(contextDir, path)
 
 	// Create directory for file if necessary
-	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(filePath), 0750); err != nil {
 		return nil, fmt.Errorf("failed to create file directory: %w", err)
 	}
 
@@ -331,7 +331,11 @@ func (tc *TaskCapture) ListContextFiles(ctx context.Context, pathPrefix string) 
 			return nil // Skip errors, just like the real implementation might
 		}
 		if !d.IsDir() {
-			relPath, _ := filepath.Rel(contextDir, path)
+			relPath, err := filepath.Rel(contextDir, path)
+			if err != nil {
+				// If relative path conversion fails, use absolute path
+				relPath = path
+			}
 			files = append(files, relPath)
 		}
 		return nil
@@ -375,14 +379,14 @@ func (tc *TaskCapture) OpenTaskFile(ctx context.Context, path string, flag int, 
 	tc.mu.Unlock()
 
 	taskDir := filepath.Join(tc.tempDir, "task", tc.task.ID)
-	if err := os.MkdirAll(taskDir, 0755); err != nil {
+	if err := os.MkdirAll(taskDir, 0750); err != nil {
 		return nil, fmt.Errorf("failed to create task directory: %w", err)
 	}
 
 	filePath := filepath.Join(taskDir, path)
 
 	// Create directory for file if necessary
-	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(filePath), 0750); err != nil {
 		return nil, fmt.Errorf("failed to create file directory: %w", err)
 	}
 
@@ -409,7 +413,11 @@ func (tc *TaskCapture) ListTaskFiles(ctx context.Context, pathPrefix string) ([]
 			return nil // Skip errors
 		}
 		if !d.IsDir() {
-			relPath, _ := filepath.Rel(taskDir, path)
+			relPath, err := filepath.Rel(taskDir, path)
+			if err != nil {
+				// If relative path conversion fails, use absolute path
+				relPath = path
+			}
 			files = append(files, relPath)
 		}
 		return nil

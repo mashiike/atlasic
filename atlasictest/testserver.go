@@ -45,7 +45,7 @@ func NewServer(tb testing.TB, agent atlasic.Agent) *TestServer {
 	tempDir := filepath.Join(baseTempDir, "atlasictest-storage")
 
 	// Create the subdirectory
-	if err := os.MkdirAll(tempDir, 0755); err != nil {
+	if err := os.MkdirAll(tempDir, 0750); err != nil {
 		panic("failed to create storage directory: " + err.Error())
 	}
 
