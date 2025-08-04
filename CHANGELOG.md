@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.3.0](https://github.com/mashiike/atlasic/compare/v0.2.2...v0.3.0) - 2025-08-04
+- feat: Add Extensions support for custom HTTP handlers by @mashiike in https://github.com/mashiike/atlasic/pull/19
+- fix: Resolve golangci-lint issues by @mashiike in https://github.com/mashiike/atlasic/pull/21
+
 ## [v0.2.2](https://github.com/mashiike/atlasic/compare/v0.2.1...v0.2.2) - 2025-07-29
 - Enhance Authenticator interface and extract base URL utility function by @mashiike in https://github.com/mashiike/atlasic/pull/17
 
