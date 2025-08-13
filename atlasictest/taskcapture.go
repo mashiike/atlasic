@@ -498,3 +498,45 @@ func (tc *TaskCapture) Task() *a2a.Task {
 	taskCopy := *tc.task
 	return &taskCopy
 }
+
+// GetLastMessageID implements TaskHandle interface
+func (tc *TaskCapture) GetLastMessageID(ctx context.Context) (string, error) {
+	tc.mu.RLock()
+	defer tc.mu.RUnlock()
+
+	if len(tc.task.History) == 0 {
+		return "", nil // No messages yet
+	}
+
+	// Return the MessageID of the last message
+	return tc.task.History[len(tc.task.History)-1].MessageID, nil
+}
+
+// GetHistorySince implements TaskHandle interface
+func (tc *TaskCapture) GetHistorySince(ctx context.Context, sinceMessageID string) ([]a2a.Message, error) {
+	tc.mu.RLock()
+	defer tc.mu.RUnlock()
+
+	if sinceMessageID == "" {
+		// If empty string, return all history
+		return tc.task.History, nil
+	}
+
+	// Find the position of sinceMessageID
+	afterIndex := len(tc.task.History) // Default: no messages after (empty result)
+
+	for i, msg := range tc.task.History {
+		if msg.MessageID == sinceMessageID {
+			afterIndex = i + 1 // Start from the message after sinceMessageID
+			break
+		}
+	}
+
+	// Return messages after the specified MessageID
+	if afterIndex < len(tc.task.History) {
+		return tc.task.History[afterIndex:], nil
+	}
+
+	// No messages found after the specified MessageID
+	return []a2a.Message{}, nil
+}
