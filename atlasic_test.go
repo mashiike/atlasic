@@ -2,6 +2,7 @@ package atlasic
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/mashiike/atlasic/a2a"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 )
 
@@ -2084,4 +2086,254 @@ func TestServer_AddExtension(t *testing.T) {
 	if server.Extensions == nil {
 		t.Error("Expected Extensions slice to be initialized")
 	}
+}
+
+func TestTaskHandle_GetLastMessageID(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockStorage := NewMockStorage(ctrl)
+	mockIDGen := NewMockIDGenerator(ctrl)
+	mockAgent := NewMockAgent(ctrl)
+
+	agentService := NewAgentService(mockStorage, mockAgent)
+	agentService.SetIDGenerator(mockIDGen)
+
+	// Create TaskHandle
+	taskHandle := agentService.NewTaskHandle(context.Background(), TaskHandleParams{
+		ContextID: "test-context",
+		TaskID:    "test-task",
+	})
+
+	t.Run("empty_history", func(t *testing.T) {
+		// Mock storage to return task with empty history
+		emptyTask := &a2a.Task{
+			ID:      "test-task",
+			History: []a2a.Message{},
+		}
+		mockStorage.EXPECT().GetTask(gomock.Any(), "test-task", -1).
+			Return(emptyTask, uint64(0), nil)
+
+		messageID, err := taskHandle.GetLastMessageID(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, "", messageID)
+	})
+
+	t.Run("single_message", func(t *testing.T) {
+		// Mock storage to return task with one message
+		taskWithMessage := &a2a.Task{
+			ID: "test-task",
+			History: []a2a.Message{
+				{MessageID: "msg-001", Role: a2a.RoleUser},
+			},
+		}
+		mockStorage.EXPECT().GetTask(gomock.Any(), "test-task", -1).
+			Return(taskWithMessage, uint64(1), nil)
+
+		messageID, err := taskHandle.GetLastMessageID(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, "msg-001", messageID)
+	})
+
+	t.Run("multiple_messages", func(t *testing.T) {
+		// Mock storage to return task with multiple messages
+		taskWithMessages := &a2a.Task{
+			ID: "test-task",
+			History: []a2a.Message{
+				{MessageID: "msg-001", Role: a2a.RoleUser},
+				{MessageID: "msg-002", Role: a2a.RoleAgent},
+				{MessageID: "msg-003", Role: a2a.RoleUser},
+			},
+		}
+		mockStorage.EXPECT().GetTask(gomock.Any(), "test-task", -1).
+			Return(taskWithMessages, uint64(3), nil)
+
+		messageID, err := taskHandle.GetLastMessageID(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, "msg-003", messageID) // Should return the last message ID
+	})
+
+	t.Run("storage_error", func(t *testing.T) {
+		// Mock storage to return error
+		mockStorage.EXPECT().GetTask(gomock.Any(), "test-task", -1).
+			Return(nil, uint64(0), errors.New("storage error"))
+
+		messageID, err := taskHandle.GetLastMessageID(context.Background())
+		require.Error(t, err)
+		require.Equal(t, "", messageID)
+		require.Contains(t, err.Error(), "failed to get task")
+	})
+}
+
+func TestTaskHandle_GetHistorySince(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockStorage := NewMockStorage(ctrl)
+	mockIDGen := NewMockIDGenerator(ctrl)
+	mockAgent := NewMockAgent(ctrl)
+
+	agentService := NewAgentService(mockStorage, mockAgent)
+	agentService.SetIDGenerator(mockIDGen)
+
+	// Create TaskHandle
+	taskHandle := agentService.NewTaskHandle(context.Background(), TaskHandleParams{
+		ContextID: "test-context",
+		TaskID:    "test-task",
+	})
+
+	// Create test messages
+	testMessages := []a2a.Message{
+		{MessageID: "msg-001", Role: a2a.RoleUser, Parts: []a2a.Part{a2a.NewTextPart("Message 1")}},
+		{MessageID: "msg-002", Role: a2a.RoleAgent, Parts: []a2a.Part{a2a.NewTextPart("Message 2")}},
+		{MessageID: "msg-003", Role: a2a.RoleUser, Parts: []a2a.Part{a2a.NewTextPart("Message 3")}},
+		{MessageID: "msg-004", Role: a2a.RoleAgent, Parts: []a2a.Part{a2a.NewTextPart("Message 4")}},
+	}
+
+	taskWithMessages := &a2a.Task{
+		ID:      "test-task",
+		History: testMessages,
+	}
+
+	t.Run("empty_since_messageID", func(t *testing.T) {
+		// Empty string should return all history
+		mockStorage.EXPECT().GetTask(gomock.Any(), "test-task", -1).
+			Return(taskWithMessages, uint64(4), nil)
+
+		history, err := taskHandle.GetHistorySince(context.Background(), "")
+		require.NoError(t, err)
+		require.Len(t, history, 4)
+		require.Equal(t, testMessages, history)
+	})
+
+	t.Run("first_message", func(t *testing.T) {
+		// Should return all messages after msg-001
+		mockStorage.EXPECT().GetTask(gomock.Any(), "test-task", -1).
+			Return(taskWithMessages, uint64(4), nil)
+
+		history, err := taskHandle.GetHistorySince(context.Background(), "msg-001")
+		require.NoError(t, err)
+		require.Len(t, history, 3)
+		require.Equal(t, testMessages[1:], history) // msg-002, msg-003, msg-004
+	})
+
+	t.Run("middle_message", func(t *testing.T) {
+		// Should return all messages after msg-002
+		mockStorage.EXPECT().GetTask(gomock.Any(), "test-task", -1).
+			Return(taskWithMessages, uint64(4), nil)
+
+		history, err := taskHandle.GetHistorySince(context.Background(), "msg-002")
+		require.NoError(t, err)
+		require.Len(t, history, 2)
+		require.Equal(t, testMessages[2:], history) // msg-003, msg-004
+	})
+
+	t.Run("last_message", func(t *testing.T) {
+		// Should return empty slice after the last message
+		mockStorage.EXPECT().GetTask(gomock.Any(), "test-task", -1).
+			Return(taskWithMessages, uint64(4), nil)
+
+		history, err := taskHandle.GetHistorySince(context.Background(), "msg-004")
+		require.NoError(t, err)
+		require.Len(t, history, 0)
+		require.Equal(t, []a2a.Message{}, history)
+	})
+
+	t.Run("nonexistent_messageID", func(t *testing.T) {
+		// Should return empty slice for non-existent message ID
+		mockStorage.EXPECT().GetTask(gomock.Any(), "test-task", -1).
+			Return(taskWithMessages, uint64(4), nil)
+
+		history, err := taskHandle.GetHistorySince(context.Background(), "msg-999")
+		require.NoError(t, err)
+		require.Len(t, history, 0)
+		require.Equal(t, []a2a.Message{}, history)
+	})
+
+	t.Run("empty_history", func(t *testing.T) {
+		// Empty history should return empty slice
+		emptyTask := &a2a.Task{
+			ID:      "test-task",
+			History: []a2a.Message{},
+		}
+		mockStorage.EXPECT().GetTask(gomock.Any(), "test-task", -1).
+			Return(emptyTask, uint64(0), nil)
+
+		history, err := taskHandle.GetHistorySince(context.Background(), "any-id")
+		require.NoError(t, err)
+		require.Len(t, history, 0)
+		require.Equal(t, []a2a.Message{}, history)
+	})
+
+	t.Run("storage_error", func(t *testing.T) {
+		// Mock storage to return error
+		mockStorage.EXPECT().GetTask(gomock.Any(), "test-task", -1).
+			Return(nil, uint64(0), errors.New("storage error"))
+
+		history, err := taskHandle.GetHistorySince(context.Background(), "msg-001")
+		require.Error(t, err)
+		require.Nil(t, history)
+		require.Contains(t, err.Error(), "failed to get task")
+	})
+}
+
+// Integration test demonstrating the typical usage pattern
+func TestTaskHandle_DifferentialMessageRetrieval(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockStorage := NewMockStorage(ctrl)
+	mockIDGen := NewMockIDGenerator(ctrl)
+	mockAgent := NewMockAgent(ctrl)
+
+	agentService := NewAgentService(mockStorage, mockAgent)
+	agentService.SetIDGenerator(mockIDGen)
+
+	taskHandle := agentService.NewTaskHandle(context.Background(), TaskHandleParams{
+		ContextID: "test-context",
+		TaskID:    "test-task",
+	})
+
+	// Initial task with 2 messages
+	initialTask := &a2a.Task{
+		ID: "test-task",
+		History: []a2a.Message{
+			{MessageID: "msg-001", Role: a2a.RoleUser, Parts: []a2a.Part{a2a.NewTextPart("Initial message")}},
+			{MessageID: "msg-002", Role: a2a.RoleAgent, Parts: []a2a.Part{a2a.NewTextPart("Agent response")}},
+		},
+	}
+
+	// Task after subroutine execution (2 new messages added)
+	updatedTask := &a2a.Task{
+		ID: "test-task",
+		History: []a2a.Message{
+			{MessageID: "msg-001", Role: a2a.RoleUser, Parts: []a2a.Part{a2a.NewTextPart("Initial message")}},
+			{MessageID: "msg-002", Role: a2a.RoleAgent, Parts: []a2a.Part{a2a.NewTextPart("Agent response")}},
+			{MessageID: "msg-003", Role: a2a.RoleAgent, Parts: []a2a.Part{a2a.NewTextPart("Subroutine message 1")}},
+			{MessageID: "msg-004", Role: a2a.RoleAgent, Parts: []a2a.Part{a2a.NewTextPart("Subroutine message 2")}},
+		},
+	}
+
+	// Step 1: Get current position
+	mockStorage.EXPECT().GetTask(gomock.Any(), "test-task", -1).
+		Return(initialTask, uint64(2), nil)
+
+	lastID, err := taskHandle.GetLastMessageID(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "msg-002", lastID)
+
+	// Step 2: Simulate subroutine execution (in real scenario, this would add messages)
+	// ... subroutine execution happens here ...
+
+	// Step 3: Get new messages since the marked position
+	mockStorage.EXPECT().GetTask(gomock.Any(), "test-task", -1).
+		Return(updatedTask, uint64(4), nil)
+
+	newMessages, err := taskHandle.GetHistorySince(context.Background(), lastID)
+	require.NoError(t, err)
+	require.Len(t, newMessages, 2)
+	require.Equal(t, "msg-003", newMessages[0].MessageID)
+	require.Equal(t, "msg-004", newMessages[1].MessageID)
+	require.Equal(t, "Subroutine message 1", newMessages[0].Parts[0].Text)
+	require.Equal(t, "Subroutine message 2", newMessages[1].Parts[0].Text)
 }

@@ -26,6 +26,10 @@ type TaskHandle interface {
 	UpdateStatus(ctx context.Context, state a2a.TaskState, parts []a2a.Part, optFns ...func(*a2a.MessageOptions)) (a2a.TaskStatus, error)
 	UpsertArtifact(ctx context.Context, artifact a2a.Artifact) error
 
+	// History-specific operations - enables differential message retrieval
+	GetLastMessageID(ctx context.Context) (string, error)
+	GetHistorySince(ctx context.Context, sinceMessageID string) ([]a2a.Message, error)
+
 	// Context virtual filesystem operations - enables context-scoped file sharing
 	OpenContextFile(ctx context.Context, path string, flag int, perm os.FileMode) (fs.File, error)
 	ListContextFiles(ctx context.Context, pathPrefix string) ([]string, error)
@@ -97,6 +101,52 @@ func (h *taskHandle) UpsertArtifact(ctx context.Context, artifact a2a.Artifact) 
 		return fmt.Errorf("failed to upsert artifact: %w", err)
 	}
 	return nil
+}
+
+// History-specific operations
+
+func (h *taskHandle) GetLastMessageID(ctx context.Context) (string, error) {
+	task, _, err := h.svc.Storage.GetTask(ctx, h.taskID, -1) // Get full history
+	if err != nil {
+		return "", fmt.Errorf("failed to get task: %w", err)
+	}
+
+	if len(task.History) == 0 {
+		return "", nil // No messages yet
+	}
+
+	// Return the MessageID of the last message
+	return task.History[len(task.History)-1].MessageID, nil
+}
+
+func (h *taskHandle) GetHistorySince(ctx context.Context, sinceMessageID string) ([]a2a.Message, error) {
+	task, _, err := h.svc.Storage.GetTask(ctx, h.taskID, -1) // Get full history
+	if err != nil {
+		return nil, fmt.Errorf("failed to get task: %w", err)
+	}
+
+	if sinceMessageID == "" {
+		// If empty string, return all history
+		return task.History, nil
+	}
+
+	// Find the position of sinceMessageID
+	afterIndex := len(task.History) // Default: no messages after (empty result)
+
+	for i, msg := range task.History {
+		if msg.MessageID == sinceMessageID {
+			afterIndex = i + 1 // Start from the message after sinceMessageID
+			break
+		}
+	}
+
+	// Return messages after the specified MessageID
+	if afterIndex < len(task.History) {
+		return task.History[afterIndex:], nil
+	}
+
+	// No messages found after the specified MessageID
+	return []a2a.Message{}, nil
 }
 
 // Context virtual filesystem operations
