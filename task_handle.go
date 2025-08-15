@@ -30,6 +30,10 @@ type TaskHandle interface {
 	GetLastMessageID(ctx context.Context) (string, error)
 	GetHistorySince(ctx context.Context, sinceMessageID string) ([]a2a.Message, error)
 
+	// Event-specific operations - enables differential event retrieval for task change tracking
+	GetLastEventVersion(ctx context.Context) (uint64, error)
+	GetEventsSince(ctx context.Context, sinceVersion uint64) ([]a2a.StreamResponse, error)
+
 	// Context virtual filesystem operations - enables context-scoped file sharing
 	OpenContextFile(ctx context.Context, path string, flag int, perm os.FileMode) (fs.File, error)
 	ListContextFiles(ctx context.Context, pathPrefix string) ([]string, error)
@@ -147,6 +151,28 @@ func (h *taskHandle) GetHistorySince(ctx context.Context, sinceMessageID string)
 
 	// No messages found after the specified MessageID
 	return []a2a.Message{}, nil
+}
+
+// Event-specific operations
+
+func (h *taskHandle) GetLastEventVersion(ctx context.Context) (uint64, error) {
+	_, lastVersion, err := h.svc.Storage.Load(ctx, h.contextID, h.taskID, 0, -1) // Get all events
+	if err != nil {
+		return 0, fmt.Errorf("failed to load events: %w", err)
+	}
+
+	// Return the version after all events (this is the "last version")
+	return lastVersion, nil
+}
+
+func (h *taskHandle) GetEventsSince(ctx context.Context, sinceVersion uint64) ([]a2a.StreamResponse, error) {
+	events, _, err := h.svc.Storage.Load(ctx, h.contextID, h.taskID, sinceVersion, -1) // Get events from sinceVersion onwards
+	if err != nil {
+		return nil, fmt.Errorf("failed to load events: %w", err)
+	}
+
+	// Storage.Load already returns events from the specified version onwards
+	return events, nil
 }
 
 // Context virtual filesystem operations
