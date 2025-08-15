@@ -1,5 +1,14 @@
 # Changelog
 
+## [v0.4.0](https://github.com/mashiike/atlasic/compare/v0.3.0...v0.4.0) - 2025-08-15
+- build(deps): Bump the aws-sdk-go-v2 group with 6 updates by @dependabot[bot] in https://github.com/mashiike/atlasic/pull/22
+- build(deps): Bump actions/checkout from 4.2.2 to 5.0.0 by @dependabot[bot] in https://github.com/mashiike/atlasic/pull/28
+- build(deps): Bump github.com/golang-jwt/jwt/v5 from 5.2.3 to 5.3.0 by @dependabot[bot] in https://github.com/mashiike/atlasic/pull/24
+- add: TaskHandle methods for partial task history retrieval by @mashiike in https://github.com/mashiike/atlasic/pull/29
+- build(deps): Bump reviewdog/action-actionlint from 1.65.2 to 1.66.0 by @dependabot[bot] in https://github.com/mashiike/atlasic/pull/23
+- build(deps): Bump github.com/fujiwara/ridge from 0.13.0 to 0.13.1 by @dependabot[bot] in https://github.com/mashiike/atlasic/pull/26
+- build(deps): Bump github.com/openai/openai-go from 1.11.1 to 1.12.0 by @dependabot[bot] in https://github.com/mashiike/atlasic/pull/25
+
 ## [v0.3.0](https://github.com/mashiike/atlasic/compare/v0.2.2...v0.3.0) - 2025-08-04
 - feat: Add Extensions support for custom HTTP handlers by @mashiike in https://github.com/mashiike/atlasic/pull/19
 - fix: Resolve golangci-lint issues by @mashiike in https://github.com/mashiike/atlasic/pull/21
