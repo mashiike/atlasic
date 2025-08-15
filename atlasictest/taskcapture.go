@@ -540,3 +540,71 @@ func (tc *TaskCapture) GetHistorySince(ctx context.Context, sinceMessageID strin
 	// No messages found after the specified MessageID
 	return []a2a.Message{}, nil
 }
+
+// GetLastEventVersion implements TaskHandle interface
+func (tc *TaskCapture) GetLastEventVersion(ctx context.Context) (uint64, error) {
+	tc.mu.RLock()
+	defer tc.mu.RUnlock()
+
+	// For testing purposes, we'll simulate event versioning based on the number of captured interactions
+	// Real implementations would use proper event store versioning
+	totalInteractions := uint64(len(tc.addedMessages) + len(tc.statusUpdates) + len(tc.upsertedArtifacts))
+	return totalInteractions, nil
+}
+
+// GetEventsSince implements TaskHandle interface
+func (tc *TaskCapture) GetEventsSince(ctx context.Context, sinceVersion uint64) ([]a2a.StreamResponse, error) {
+	tc.mu.RLock()
+	defer tc.mu.RUnlock()
+
+	// For testing purposes, we'll create StreamResponse objects based on captured interactions
+	// Real implementations would retrieve actual events from the event store
+	var events []a2a.StreamResponse
+
+	// Convert captured messages to StreamResponse events
+	for i, msg := range tc.addedMessages {
+		if uint64(i) >= sinceVersion {
+			events = append(events, a2a.StreamResponse{
+				Message: &a2a.Message{
+					Kind:      "message",
+					MessageID: msg.MessageID,
+					Role:      a2a.RoleAgent,
+					Parts:     msg.Parts,
+				},
+			})
+		}
+	}
+
+	// Convert captured status updates to StreamResponse events
+	statusOffset := uint64(len(tc.addedMessages))
+	for i, status := range tc.statusUpdates {
+		if statusOffset+uint64(i) >= sinceVersion {
+			events = append(events, a2a.StreamResponse{
+				Status: &a2a.TaskStatusUpdateEvent{
+					Kind:      "status_update",
+					TaskID:    tc.task.ID,
+					ContextID: tc.task.ContextID,
+					Status:    status.Status,
+					Final:     status.State == a2a.TaskStateCompleted || status.State == a2a.TaskStateFailed,
+				},
+			})
+		}
+	}
+
+	// Convert captured artifact updates to StreamResponse events
+	artifactOffset := statusOffset + uint64(len(tc.statusUpdates))
+	for i, artifact := range tc.upsertedArtifacts {
+		if artifactOffset+uint64(i) >= sinceVersion {
+			events = append(events, a2a.StreamResponse{
+				Artifact: &a2a.TaskArtifactUpdateEvent{
+					Kind:      "artifact_update",
+					TaskID:    tc.task.ID,
+					ContextID: tc.task.ContextID,
+					Artifact:  artifact,
+				},
+			})
+		}
+	}
+
+	return events, nil
+}

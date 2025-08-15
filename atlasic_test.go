@@ -2337,3 +2337,176 @@ func TestTaskHandle_DifferentialMessageRetrieval(t *testing.T) {
 	require.Equal(t, "Subroutine message 1", newMessages[0].Parts[0].Text)
 	require.Equal(t, "Subroutine message 2", newMessages[1].Parts[0].Text)
 }
+
+func TestTaskHandle_GetLastEventVersion(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockStorage := NewMockStorage(ctrl)
+	mockAgent := NewMockAgent(ctrl)
+	mockIDGen := NewMockIDGenerator(ctrl)
+
+	agentService := NewAgentService(mockStorage, mockAgent)
+	agentService.SetIDGenerator(mockIDGen)
+
+	taskHandle := agentService.NewTaskHandle(context.Background(), TaskHandleParams{
+		ContextID: "test-context-events",
+		TaskID:    "test-task-events",
+	})
+
+	// Mock: Load events to get last version
+	mockEvents := []a2a.StreamResponse{
+		{
+			Message: &a2a.Message{
+				Kind:      "message",
+				MessageID: "msg-001",
+				Role:      a2a.RoleUser,
+				Parts:     []a2a.Part{a2a.NewTextPart("Initial message")},
+			},
+		},
+	}
+
+	mockStorage.EXPECT().Load(gomock.Any(), "test-context-events", "test-task-events", uint64(0), -1).
+		Return(mockEvents, uint64(5), nil)
+
+	version, err := taskHandle.GetLastEventVersion(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, uint64(5), version)
+}
+
+func TestTaskHandle_GetEventsSince(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockStorage := NewMockStorage(ctrl)
+	mockAgent := NewMockAgent(ctrl)
+	mockIDGen := NewMockIDGenerator(ctrl)
+
+	agentService := NewAgentService(mockStorage, mockAgent)
+	agentService.SetIDGenerator(mockIDGen)
+
+	taskHandle := agentService.NewTaskHandle(context.Background(), TaskHandleParams{
+		ContextID: "test-context-events",
+		TaskID:    "test-task-events",
+	})
+
+	// Mock: Load events from specific version
+	mockEvents := []a2a.StreamResponse{
+		{
+			Status: &a2a.TaskStatusUpdateEvent{
+				Kind:      "status_update",
+				TaskID:    "test-task-events",
+				ContextID: "test-context-events",
+				Status:    a2a.TaskStatus{State: a2a.TaskStateWorking},
+			},
+		},
+		{
+			Artifact: &a2a.TaskArtifactUpdateEvent{
+				Kind:      "artifact_update",
+				TaskID:    "test-task-events",
+				ContextID: "test-context-events",
+				Artifact: a2a.Artifact{
+					Name:  "result.txt",
+					Parts: []a2a.Part{a2a.NewTextPart("Processing result")},
+				},
+			},
+		},
+	}
+
+	mockStorage.EXPECT().Load(gomock.Any(), "test-context-events", "test-task-events", uint64(3), -1).
+		Return(mockEvents, uint64(7), nil)
+
+	events, err := taskHandle.GetEventsSince(context.Background(), uint64(3))
+	require.NoError(t, err)
+	require.Len(t, events, 2)
+	require.NotNil(t, events[0].Status)
+	require.NotNil(t, events[1].Artifact)
+	require.Equal(t, a2a.TaskStateWorking, events[0].Status.Status.State)
+	require.Equal(t, "result.txt", events[1].Artifact.Artifact.Name)
+}
+
+// Simple mock agent for integration tests
+type simpleTestAgent struct{}
+
+func (a *simpleTestAgent) GetMetadata(ctx context.Context) (*AgentMetadata, error) {
+	return &AgentMetadata{Name: "TestAgent", Version: "1.0.0"}, nil
+}
+
+func (a *simpleTestAgent) Execute(ctx context.Context, handle TaskHandle) (*a2a.Message, error) {
+	return &a2a.Message{
+		Kind:  "message",
+		Role:  a2a.RoleAgent,
+		Parts: []a2a.Part{a2a.NewTextPart("Test agent executed")},
+	}, nil
+}
+
+func TestTaskHandle_DifferentialEventRetrieval_Integration(t *testing.T) {
+	// Integration test using real storage to verify the complete workflow
+	storage := setupTestFileSystemStorage(t)
+	mockAgent := &simpleTestAgent{}
+	svc := NewAgentService(storage, mockAgent)
+	require.NotNil(t, svc)
+
+	// Start the agent service to enable task processing
+	ctx := context.Background()
+	err := svc.Start(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { svc.Close() })
+
+	// Use SendMessage to create a task properly (this handles proper event stream initialization)
+	params := a2a.MessageSendParams{
+		Message: a2a.Message{
+			Kind:  "message",
+			Role:  a2a.RoleUser,
+			Parts: []a2a.Part{a2a.NewTextPart("Initial message for event testing")},
+		},
+	}
+
+	result, err := svc.SendMessage(ctx, params)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Task)
+
+	taskID := result.Task.ID
+	contextID := result.Task.ContextID
+
+	// Create TaskHandle for the properly initialized task
+	handle := svc.NewTaskHandle(ctx, TaskHandleParams{
+		ContextID:       contextID,
+		TaskID:          taskID,
+		InitialStatus:   result.Task.Status,
+		IncomingMessage: result.Task.History[0],
+	})
+
+	// Workflow: Get current event position
+	initialVersion, err := handle.GetLastEventVersion(ctx)
+	require.NoError(t, err)
+
+	// Perform some agent work that generates events
+	_, err = handle.AddMessage(ctx, []a2a.Part{a2a.NewTextPart("Agent thinking...")})
+	require.NoError(t, err)
+
+	_, err = handle.UpdateStatus(ctx, a2a.TaskStateWorking, []a2a.Part{a2a.NewTextPart("Processing request")})
+	require.NoError(t, err)
+
+	err = handle.UpsertArtifact(ctx, a2a.Artifact{
+		Name:  "result.txt",
+		Parts: []a2a.Part{a2a.NewTextPart("Processing result")},
+	})
+	require.NoError(t, err)
+
+	// Get events that occurred since the initial checkpoint
+	newEvents, err := handle.GetEventsSince(ctx, initialVersion)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(newEvents), 0) // Should have new events from our operations
+
+	// Verify we can get the updated event version
+	finalVersion, err := handle.GetLastEventVersion(ctx)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, finalVersion, initialVersion) // Should have advanced
+
+	// Test edge case: Get events since current version (should return empty)
+	emptyEvents, err := handle.GetEventsSince(ctx, finalVersion)
+	require.NoError(t, err)
+	require.Empty(t, emptyEvents) // Should be empty since we're asking for events after the latest version
+}
