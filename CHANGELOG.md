@@ -1,5 +1,8 @@
 # Changelog
 
+## [v0.4.1](https://github.com/mashiike/atlasic/compare/v0.4.0...v0.4.1) - 2025-08-15
+- feat: Add event retrieval methods to TaskHandle interface by @mashiike in https://github.com/mashiike/atlasic/pull/30
+
 ## [v0.4.0](https://github.com/mashiike/atlasic/compare/v0.3.0...v0.4.0) - 2025-08-15
 - build(deps): Bump the aws-sdk-go-v2 group with 6 updates by @dependabot[bot] in https://github.com/mashiike/atlasic/pull/22
 - build(deps): Bump actions/checkout from 4.2.2 to 5.0.0 by @dependabot[bot] in https://github.com/mashiike/atlasic/pull/28
